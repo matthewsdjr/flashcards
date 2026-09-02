@@ -117,6 +117,19 @@ async function run(theme: 'light' | 'dark') {
 }
 
 async function main() {
+  // El recorrido crea una cuenta, y en un servidor recien instalado la primera
+  // cuenta queda como administradora. Correrlo contra produccion se llevaria
+  // ese lugar, asi que se exige confirmacion explicita.
+  const remoto = !/^https?:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(BASE)
+  if (remoto && !process.env.PERMITIR_REMOTO) {
+    console.error(
+      `Rechazado: ${BASE} no es local y el recorrido crea una cuenta.\n` +
+        'Si el servidor ya tiene su cuenta administradora, volve a correrlo con ' +
+        'PERMITIR_REMOTO=1.',
+    )
+    process.exit(1)
+  }
+
   mkdirSync(OUT, { recursive: true })
   for (const theme of ['light', 'dark'] as const) {
     console.log(`\n${theme}:`)

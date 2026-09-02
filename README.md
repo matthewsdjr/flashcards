@@ -78,7 +78,7 @@ Requiere Node 22 o superior para desarrollo; el contenedor usa Node 24, donde `n
 
 `npm test` levanta un servidor real contra una base temporal y verifica autenticación, invitaciones, importación, estudio, respaldo y —sobre todo— que una cuenta no pueda alcanzar los datos de otra.
 
-`npm run shots` levanta Chrome, crea una cuenta, importa un mazo, estudia y recorre el progreso en claro y oscuro más la vista móvil; falla si aparece cualquier error de consola. Acepta una URL para revisar un despliegue: `npm run shots -- http://100.118.186.97:8080`.
+`npm run shots` levanta Chrome, crea una cuenta, importa un mazo, estudia y recorre el progreso en claro y oscuro más la vista móvil; falla si aparece cualquier error de consola. Como **crea una cuenta**, y en un servidor recién instalado la primera cuenta queda como administradora, sólo corre contra `localhost` salvo que lo fuerces: `PERMITIR_REMOTO=1 npm run shots -- http://tu-servidor:8080`.
 
 ## Diseño
 
