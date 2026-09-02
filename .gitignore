@@ -25,3 +25,7 @@ dist-ssr
 
 # Capturas de revision de diseño
 shots/
+
+# Base de datos y archivos subidos en desarrollo
+datos/
+dist-server/

@@ -1,18 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db/schema'
-import { createDeck } from '../db/queries'
-import {
-  FIELD_ROLE_LABELS,
-  delimiterName,
-  guessMapping,
-  parseDelimited,
-  splitTags,
-  type FieldRole,
-  type ParsedFile,
-} from '../lib/parse'
-import { importRows, rowToNote, type ImportResult } from '../lib/import'
+import { api } from '../api/cliente.ts'
+import { useAccion, useConsulta } from '../api/hooks.ts'
 import {
   Button,
   Checkbox,
@@ -21,20 +10,68 @@ import {
   SectionHeading,
   Stat,
   Tag,
-} from '../components/ui'
-import { cx, inputClass } from '../lib/classnames'
+} from '../components/ui.tsx'
+import { cx, inputClass } from '../lib/classnames.ts'
+import { FIELD_ROLE_LABELS, delimiterName, guessMapping, splitTags, type FieldRole } from '../../shared/parse.ts'
+import type { DeckWithStats } from '../../shared/tipos.ts'
 
 const NEW_DECK = '__new__'
+
+interface Analisis {
+  importId: number
+  filename: string
+  bytes: number
+  headers: string[]
+  hasHeader: boolean
+  delimiter: string
+  errors: string[]
+  sample: string[][]
+  totalRows: number
+}
+
+interface Resultado {
+  added: number
+  updated: number
+  skipped: number
+  invalid: number
+  cardsCreated: number
+  deckId: number
+  deckName: string
+}
+
+/** Vista previa local de una fila, con el mapeo elegido. */
+function previewRow(row: string[], mapping: FieldRole[], extraTags: string[]) {
+  const parts: Record<'front' | 'back' | 'hint' | 'extra', string[]> = {
+    front: [],
+    back: [],
+    hint: [],
+    extra: [],
+  }
+  const tags = [...extraTags]
+  mapping.forEach((role, index) => {
+    const value = (row[index] ?? '').trim()
+    if (!value || role === 'ignore') return
+    if (role === 'tags') tags.push(...splitTags(value))
+    else parts[role].push(value)
+  })
+  return {
+    front: parts.front.join('\n'),
+    back: parts.back.join('\n'),
+    hint: parts.hint.join('\n'),
+    extra: parts.extra.join('\n'),
+    tags: [...new Set(tags)],
+  }
+}
 
 export default function Import() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const fileInput = useRef<HTMLInputElement>(null)
 
-  const decks = useLiveQuery(() => db.decks.orderBy('name').toArray(), [])
+  const mazos = useConsulta(() => api.get<{ decks: DeckWithStats[] }>('/mazos'), [])
+  const { ejecutar, enviando, error, setError } = useAccion()
 
-  const [filename, setFilename] = useState('')
-  const [parsed, setParsed] = useState<ParsedFile | null>(null)
+  const [analisis, setAnalisis] = useState<Analisis | null>(null)
   const [mapping, setMapping] = useState<FieldRole[]>([])
   const [dragging, setDragging] = useState(false)
   const [deckChoice, setDeckChoice] = useState(searchParams.get('deck') ?? NEW_DECK)
@@ -42,102 +79,77 @@ export default function Import() {
   const [onDuplicate, setOnDuplicate] = useState<'skip' | 'update' | 'add'>('skip')
   const [tagsInput, setTagsInput] = useState('')
   const [generateReverse, setGenerateReverse] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<(ImportResult & { deckId: number }) | null>(null)
-  const [error, setError] = useState('')
+  const [resultado, setResultado] = useState<Resultado | null>(null)
 
-  async function handleFile(file: File) {
-    setError('')
-    setResult(null)
-    try {
-      const text = await file.text()
-      const data = parseDelimited(text)
-      if (data.rows.length === 0) {
-        setError('Ese archivo no tiene filas con datos. Revisa que no este vacio.')
-        setParsed(null)
-        return
-      }
-      setFilename(file.name)
-      setParsed(data)
-      setMapping(guessMapping(data.headers, data.hasHeader))
-      if (!newDeckName) setNewDeckName(file.name.replace(/\.(tsv|csv|txt)$/i, ''))
-    } catch {
-      setError('No se pudo leer el archivo. Tiene que ser un archivo de texto.')
-    }
+  async function subir(file: File) {
+    setResultado(null)
+    const form = new FormData()
+    form.append('archivo', file)
+    const data = await ejecutar(() => api.post<Analisis>('/importaciones/analizar', form))
+    if (!data) return
+    setAnalisis(data)
+    setMapping(guessMapping(data.headers, data.hasHeader))
+    if (!newDeckName) setNewDeckName(data.filename.replace(/\.(tsv|csv|txt)$/i, ''))
   }
 
   const extraTags = useMemo(() => splitTags(tagsInput), [tagsInput])
 
-  const previewNotes = useMemo(() => {
-    if (!parsed) return []
-    return parsed.rows.slice(0, 4).map((row) => rowToNote(row, mapping, extraTags))
-  }, [parsed, mapping, extraTags])
-
-  const validCount = useMemo(() => {
-    if (!parsed) return 0
-    return parsed.rows.filter((row) => {
-      const note = rowToNote(row, mapping, extraTags)
-      return note.front && note.back
-    }).length
-  }, [parsed, mapping, extraTags])
+  const previews = useMemo(
+    () => (analisis?.sample ?? []).slice(0, 4).map((row) => previewRow(row, mapping, extraTags)),
+    [analisis, mapping, extraTags],
+  )
 
   const hasFront = mapping.includes('front')
   const hasBack = mapping.includes('back')
   const deckNameOk = deckChoice !== NEW_DECK || newDeckName.trim().length > 0
-  const canImport = Boolean(parsed) && hasFront && hasBack && validCount > 0 && deckNameOk && !busy
+  const canImport = Boolean(analisis) && hasFront && hasBack && deckNameOk && !enviando
 
-  async function handleImport() {
-    if (!parsed) return
-    setBusy(true)
-    setError('')
-    try {
-      let deckId: number
-      if (deckChoice === NEW_DECK) {
-        deckId = await createDeck(newDeckName, `Importado de ${filename}`, { generateReverse })
-      } else {
-        deckId = Number(deckChoice)
-        await db.decks.update(deckId, { 'config.generateReverse': generateReverse })
-      }
-      const res = await importRows({ deckId, rows: parsed.rows, mapping, onDuplicate, extraTags })
-      setResult({ ...res, deckId })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'La importacion no se completo')
-    } finally {
-      setBusy(false)
-    }
+  async function confirmar() {
+    if (!analisis) return
+    const data = await ejecutar(() =>
+      api.post<Resultado>('/importaciones/confirmar', {
+        importId: analisis.importId,
+        deckId: deckChoice === NEW_DECK ? null : Number(deckChoice),
+        newDeckName,
+        mapping,
+        onDuplicate,
+        tags: tagsInput,
+        generateReverse,
+      }),
+    )
+    if (data) setResultado(data)
   }
 
   function reset() {
-    setParsed(null)
-    setResult(null)
-    setFilename('')
-    setError('')
+    setAnalisis(null)
+    setResultado(null)
+    setError(null)
     if (fileInput.current) fileInput.current.value = ''
   }
 
-  if (result) {
+  if (resultado) {
     return (
       <div className="mx-auto max-w-md space-y-7 text-center">
         <div>
           <h1 className="display text-3xl font-medium">Listo para estudiar</h1>
           <p className="mt-2 text-sm text-ink-2">
-            {result.added > 0
-              ? `Se agregaron ${result.added} notas al mazo.`
+            {resultado.added > 0
+              ? `Se agregaron ${resultado.added} notas a ${resultado.deckName}.`
               : 'No habia nada nuevo que agregar.'}
           </p>
         </div>
 
         <Panel className="grid grid-cols-3 gap-4 px-6 py-5 text-left">
-          <Stat value={result.cardsCreated} label="tarjetas creadas" tone="claret" />
-          <Stat value={result.skipped} label="duplicadas" />
-          <Stat value={result.invalid} label="descartadas" />
+          <Stat value={resultado.cardsCreated} label="tarjetas creadas" tone="claret" />
+          <Stat value={resultado.skipped} label="duplicadas" />
+          <Stat value={resultado.invalid} label="descartadas" />
         </Panel>
 
         <div className="flex justify-center gap-2">
           <Button variant="secondary" onClick={reset}>
             Importar otro
           </Button>
-          <Button variant="primary" onClick={() => navigate(`/estudiar/${result.deckId}`)}>
+          <Button variant="primary" onClick={() => navigate(`/estudiar/${resultado.deckId}`)}>
             Empezar a estudiar
           </Button>
         </div>
@@ -150,7 +162,7 @@ export default function Import() {
       <SectionHeading
         as="h1"
         title="Importar tarjetas"
-        description="Acepta TSV, CSV y archivos separados por punto y coma o barra vertical. El separador se detecta solo, y el preambulo que agrega Anki se ignora."
+        description="Acepta TSV, CSV y archivos separados por punto y coma o barra vertical. El separador se detecta solo, y el archivo original queda guardado en tu cuenta."
       />
 
       <div
@@ -163,7 +175,7 @@ export default function Import() {
           e.preventDefault()
           setDragging(false)
           const file = e.dataTransfer.files[0]
-          if (file) void handleFile(file)
+          if (file) void subir(file)
         }}
         className={cx(
           'rounded-lg border border-dashed px-6 py-12 text-center transition',
@@ -172,8 +184,8 @@ export default function Import() {
       >
         <p className="text-sm text-ink-2">Arrastra tu archivo hasta aca</p>
         <div className="mt-4">
-          <Button variant="secondary" onClick={() => fileInput.current?.click()}>
-            Elegir archivo
+          <Button variant="secondary" onClick={() => fileInput.current?.click()} disabled={enviando}>
+            {enviando && !analisis ? 'Subiendo' : 'Elegir archivo'}
           </Button>
         </div>
         <input
@@ -183,25 +195,26 @@ export default function Import() {
           className="sr-only"
           onChange={(e) => {
             const file = e.target.files?.[0]
-            if (file) void handleFile(file)
+            if (file) void subir(file)
           }}
         />
-        {filename && parsed && (
+        {analisis && (
           <p className="tnum mt-4 text-xs text-ink-2">
-            {filename} · {parsed.rows.length} filas · {delimiterName(parsed.delimiter)}
-            {parsed.hasHeader && ' · con encabezado'}
+            {analisis.filename} · {analisis.totalRows} filas ·{' '}
+            {delimiterName(analisis.delimiter)}
+            {analisis.hasHeader && ' · con encabezado'}
           </p>
         )}
       </div>
 
       {error && <p className="text-sm text-danger">{error}</p>}
-      {parsed?.errors.map((e) => (
+      {analisis?.errors.map((e) => (
         <p key={e} className="text-xs text-hard">
           {e}
         </p>
       ))}
 
-      {parsed && (
+      {analisis && (
         <>
           <div>
             <SectionHeading
@@ -218,11 +231,11 @@ export default function Import() {
                   </tr>
                 </thead>
                 <tbody>
-                  {parsed.headers.map((header, index) => (
+                  {analisis.headers.map((header, index) => (
                     <tr key={index} className="border-b border-rule-soft">
                       <td className="py-2.5 pr-4 font-medium text-ink">{header}</td>
                       <td className="max-w-70 truncate py-2.5 pr-4 text-ink-2">
-                        {parsed.rows[0]?.[index] || <span className="text-ink-3">vacio</span>}
+                        {analisis.sample[0]?.[index] || <span className="text-ink-3">vacio</span>}
                       </td>
                       <td className="py-2.5">
                         <select
@@ -265,7 +278,7 @@ export default function Import() {
                   onChange={(e) => setDeckChoice(e.target.value)}
                 >
                   <option value={NEW_DECK}>Crear un mazo nuevo</option>
-                  {decks?.map((deck) => (
+                  {mazos.data?.decks.map((deck) => (
                     <option key={deck.id} value={String(deck.id)}>
                       {deck.name}
                     </option>
@@ -316,19 +329,10 @@ export default function Import() {
           <div>
             <SectionHeading
               title="Asi van a quedar"
-              actions={
-                <span
-                  className={cx(
-                    'tnum text-sm font-medium',
-                    validCount > 0 ? 'text-ink' : 'text-danger',
-                  )}
-                >
-                  {validCount} de {parsed.rows.length} filas utiles
-                </span>
-              }
+              description={`Muestra de las primeras filas. El archivo completo tiene ${analisis.totalRows}.`}
             />
             <ul className="mt-5 space-y-2">
-              {previewNotes.map((note, i) => (
+              {previews.map((note, i) => (
                 <li key={i} className="rounded-lg border border-rule bg-paper px-4 py-3">
                   <p className="card-face text-base text-ink">
                     {note.front || <span className="text-danger">falta el frente</span>}
@@ -353,8 +357,8 @@ export default function Import() {
             <Link to="/">
               <Button variant="ghost">Cancelar</Button>
             </Link>
-            <Button variant="primary" disabled={!canImport} onClick={() => void handleImport()}>
-              {busy ? 'Importando' : `Importar ${validCount} tarjetas`}
+            <Button variant="primary" disabled={!canImport} onClick={() => void confirmar()}>
+              {enviando ? 'Importando' : `Importar ${analisis.totalRows} filas`}
             </Button>
           </div>
         </>

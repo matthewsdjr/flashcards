@@ -1,155 +1,330 @@
 /**
- * Prueba de humo del nucleo: parsear -> importar -> encolar -> calificar.
- * Corre en Node sobre un IndexedDB simulado. Uso: npm test
+ * Prueba de humo de la API contra un servidor real y una base descartable.
+ * Cubre autenticacion, invitaciones, importacion, estudio y — sobre todo —
+ * que una cuenta no pueda alcanzar los datos de otra.
+ * Uso: npm test
  */
-import 'fake-indexeddb/auto'
-import { readFileSync } from 'node:fs'
-import { CardState, DEFAULT_DECK_CONFIG, db } from '../src/db/schema'
-import { answerCard, buildQueue, createDeck, deckStats } from '../src/db/queries'
-import { guessMapping, parseDelimited } from '../src/lib/parse'
-import { importRows } from '../src/lib/import'
-import { exportBackup, restoreBackup } from '../src/lib/backup'
-import { Rating } from '../src/lib/scheduler'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+const PORT = 3999
+const BASE = `http://127.0.0.1:${PORT}`
+const DATA_DIR = mkdtempSync(join(tmpdir(), 'flashcards-test-'))
 
 let failures = 0
+let server: ChildProcess | null = null
 
 function check(label: string, condition: boolean, detail = '') {
   if (condition) {
     console.log(`  ok   ${label}`)
   } else {
     failures++
-    console.log(`  FAIL ${label}${detail ? ` -> ${detail}` : ''}`)
+    console.log(`  FALLA ${label}${detail ? ` -> ${detail}` : ''}`)
   }
+}
+
+/** Cliente HTTP que conserva la cookie de sesion, como haria un navegador. */
+class Cliente {
+  cookie = ''
+
+  async req(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<{ status: number; data: any }> {
+    const headers: Record<string, string> = {}
+    if (this.cookie) headers.Cookie = this.cookie
+    let payload: BodyInit | undefined
+    if (body instanceof FormData) {
+      payload = body
+    } else if (body !== undefined) {
+      headers['Content-Type'] = 'application/json'
+      payload = JSON.stringify(body)
+    }
+
+    const response = await fetch(`${BASE}/api${path}`, { method, headers, body: payload })
+    const setCookie = response.headers.get('set-cookie')
+    if (setCookie) this.cookie = setCookie.split(';')[0]!
+
+    const text = await response.text()
+    let data: any = null
+    try {
+      data = text ? JSON.parse(text) : null
+    } catch {
+      data = text
+    }
+    return { status: response.status, data }
+  }
+
+  get = (p: string) => this.req('GET', p)
+  post = (p: string, b?: unknown) => this.req('POST', p, b)
+  patch = (p: string, b?: unknown) => this.req('PATCH', p, b)
+  del = (p: string) => this.req('DELETE', p)
+}
+
+async function arrancarServidor() {
+  server = spawn(
+    process.execPath,
+    ['--experimental-strip-types', '--no-warnings', 'server/index.ts'],
+    {
+      env: {
+        ...process.env,
+        PORT: String(PORT),
+        HOST: '127.0.0.1',
+        DATA_DIR,
+        LOG_LEVEL: 'error',
+        CLIENT_DIR: '/tmp/no-existe-cliente',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  )
+  server.stderr?.on('data', (d) => {
+    const text = String(d)
+    if (!text.includes('ExperimentalWarning')) process.stderr.write(text)
+  })
+
+  for (let i = 0; i < 60; i++) {
+    try {
+      const response = await fetch(`${BASE}/api/mazos/_ping`)
+      if (response.status === 200 || response.status === 401) return
+    } catch {
+      // el servidor todavia no escucha
+    }
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  throw new Error('el servidor no arranco')
 }
 
 async function main() {
-  console.log('\nParseo de archivos')
-  const tsv = parseDelimited(readFileSync('ejemplos/biologia-celular.tsv', 'utf8'))
-  check('detecta el tabulador', tsv.delimiter === '\t', tsv.delimiter)
-  check('detecta el encabezado', tsv.hasHeader)
-  check('lee las 10 filas de datos', tsv.rows.length === 10, String(tsv.rows.length))
+  await arrancarServidor()
 
-  const csv = parseDelimited(readFileSync('ejemplos/verbos-irregulares-ingles.csv', 'utf8'))
-  check('detecta la coma', csv.delimiter === ',', csv.delimiter)
-  check('lee las 8 filas del CSV', csv.rows.length === 8, String(csv.rows.length))
+  const ana = new Cliente()
+  const beto = new Cliente()
 
-  const ankiStyle = parseDelimited('#separator:tab\n#html:false\nhola\thello\nadios\tbye\n')
-  check('ignora el preambulo de Anki', ankiStyle.skipped === 2, String(ankiStyle.skipped))
-  check('sin encabezado usa columnas sinteticas', !ankiStyle.hasHeader)
-  check('parsea las 2 filas', ankiStyle.rows.length === 2, String(ankiStyle.rows.length))
+  console.log('\nAutenticacion')
+  const estado = await ana.get('/auth/yo')
+  check('el servidor nuevo pide la primera cuenta', estado.data?.necesitaPrimeraCuenta === true)
+  check('sin sesion /auth/yo responde 200 con user nulo', estado.status === 200 && estado.data?.user === null)
 
-  const mapping = guessMapping(tsv.headers, tsv.hasHeader)
-  check('mapea Front/Back/Tags por nombre', mapping[0] === 'front' && mapping[1] === 'back' && mapping[4] === 'tags', mapping.join(','))
+  const sinSesion = await ana.get('/mazos')
+  check('sin sesion la API responde 401', sinSesion.status === 401, String(sinSesion.status))
+
+  const debil = await ana.post('/auth/registro', {
+    email: 'ana@ejemplo.com',
+    name: 'Ana',
+    password: 'corta',
+  })
+  check('rechaza una contraseña debil', debil.status === 400, String(debil.status))
+
+  const alta = await ana.post('/auth/registro', {
+    email: 'ana@ejemplo.com',
+    name: 'Ana',
+    password: 'clave-larga-123',
+  })
+  check('crea la primera cuenta', alta.status === 201, String(alta.status))
+  check('la primera cuenta es administradora', alta.data?.isAdmin === true)
+
+  const yo = await ana.get('/auth/yo')
+  check('la cookie de sesion identifica al usuario', yo.data?.user?.email === 'ana@ejemplo.com')
+
+  const estado2 = await beto.get('/auth/yo')
+  check('ya no hace falta una primera cuenta', estado2.data?.necesitaPrimeraCuenta === false)
+
+  console.log('\nInvitaciones')
+  const sinInvitacion = await beto.post('/auth/registro', {
+    email: 'beto@ejemplo.com',
+    name: 'Beto',
+    password: 'otra-clave-456',
+  })
+  check('el registro sin invitacion se rechaza', sinInvitacion.status === 400, String(sinInvitacion.status))
+
+  const inventado = await beto.post('/auth/registro', {
+    email: 'beto@ejemplo.com',
+    name: 'Beto',
+    password: 'otra-clave-456',
+    invite: 'XXXX-XXXX-XXXX',
+  })
+  check('un codigo inventado se rechaza', inventado.status === 400)
+
+  const invitacion = await ana.post('/invitaciones', { note: 'para beto' })
+  check('la administradora genera un codigo', invitacion.status === 201 && Boolean(invitacion.data?.code))
+  const codigo = invitacion.data.code as string
+
+  const conInvitacion = await beto.post('/auth/registro', {
+    email: 'beto@ejemplo.com',
+    name: 'Beto',
+    password: 'otra-clave-456',
+    invite: codigo,
+  })
+  check('con invitacion valida se crea la cuenta', conInvitacion.status === 201, String(conInvitacion.status))
+  check('la segunda cuenta no es administradora', conInvitacion.data?.isAdmin !== true)
+
+  const reusar = new Cliente()
+  const reuso = await reusar.post('/auth/registro', {
+    email: 'carla@ejemplo.com',
+    name: 'Carla',
+    password: 'tercera-clave-789',
+    invite: codigo,
+  })
+  check('un codigo ya usado se rechaza', reuso.status === 400, String(reuso.status))
+
+  const noAdmin = await beto.get('/invitaciones')
+  check('quien no es admin no ve las invitaciones', noAdmin.status === 403, String(noAdmin.status))
 
   console.log('\nImportacion')
-  const deckId = await createDeck('Biologia celular')
-  const result = await importRows({
-    deckId,
-    rows: tsv.rows,
-    mapping,
-    onDuplicate: 'skip',
-    extraTags: ['parcial1'],
+  const tsv = readFileSync('ejemplos/biologia-celular.tsv')
+  const form = new FormData()
+  form.append('archivo', new Blob([tsv], { type: 'text/tab-separated-values' }), 'biologia.tsv')
+  const analisis = await ana.post('/importaciones/analizar', form)
+  check('analiza el archivo subido', analisis.status === 200, String(analisis.status))
+  check('detecta el tabulador', analisis.data?.delimiter === '\t')
+  check('detecta el encabezado', analisis.data?.hasHeader === true)
+  check('cuenta las 10 filas', analisis.data?.totalRows === 10, String(analisis.data?.totalRows))
+
+  const sinCaras = await ana.post('/importaciones/confirmar', {
+    importId: analisis.data.importId,
+    newDeckName: 'Prueba',
+    mapping: ['ignore', 'ignore', 'ignore', 'ignore', 'ignore'],
   })
-  check('agrega 10 notas', result.added === 10, String(result.added))
-  check('crea 1 tarjeta por nota', result.cardsCreated === 10, String(result.cardsCreated))
+  check('sin frente ni reverso no importa', sinCaras.status === 400, String(sinCaras.status))
 
-  const note = await db.notes.where('deckId').equals(deckId).first()
-  check('conserva la pista', note?.hint === 'La central energetica', note?.hint)
-  check('suma la etiqueta global', note?.tags.includes('parcial1') === true, note?.tags.join(','))
-
-  const again = await importRows({ deckId, rows: tsv.rows, mapping, onDuplicate: 'skip', extraTags: [] })
-  check('omite los duplicados al reimportar', again.added === 0 && again.skipped === 10, `added=${again.added} skipped=${again.skipped}`)
-
-  const invalid = await importRows({
-    deckId,
-    rows: [['solo frente', ''], ['', 'solo reverso']],
-    mapping: ['front', 'back'],
+  const confirmado = await ana.post('/importaciones/confirmar', {
+    importId: analisis.data.importId,
+    newDeckName: 'Biologia celular',
+    mapping: ['front', 'back', 'hint', 'extra', 'tags'],
     onDuplicate: 'skip',
-    extraTags: [],
+    tags: 'parcial1',
   })
-  check('descarta filas sin frente o reverso', invalid.invalid === 2, String(invalid.invalid))
+  check('importa las 10 notas', confirmado.data?.added === 10, String(confirmado.data?.added))
+  check('crea una tarjeta por nota', confirmado.data?.cardsCreated === 10)
+  const mazoAna = confirmado.data.deckId as number
 
-  console.log('\nCola de estudio y limites diarios')
-  const deck = (await db.decks.get(deckId))!
-  const queue = await buildQueue(deck)
-  check('encola las 10 tarjetas nuevas', queue.length === 10, String(queue.length))
+  const historial = await ana.get('/importaciones')
+  check('queda registrada la importacion', historial.data?.imports?.length === 1)
+  const archivo = await fetch(`${BASE}/api/importaciones/${historial.data.imports[0].id}/archivo`, {
+    headers: { Cookie: ana.cookie },
+  })
+  const contenido = await archivo.text()
+  check('el archivo original se puede descargar', contenido.includes('mitocondria'))
 
-  await db.decks.update(deckId, { config: { ...DEFAULT_DECK_CONFIG, newPerDay: 3 } })
-  const limited = await buildQueue((await db.decks.get(deckId))!)
-  check('respeta el limite de nuevas por dia', limited.length === 3, String(limited.length))
-  await db.decks.update(deckId, { config: DEFAULT_DECK_CONFIG })
+  console.log('\nAislamiento entre cuentas')
+  const betoVeMazos = await beto.get('/mazos')
+  check('beto no ve los mazos de ana', betoVeMazos.data?.decks?.length === 0)
 
-  console.log('\nProgramacion FSRS')
-  const config = (await db.decks.get(deckId))!.config
-  const first = (await buildQueue((await db.decks.get(deckId))!))[0]
-  check('la tarjeta arranca como nueva', first.state === CardState.New)
+  const betoAbre = await beto.get(`/mazos/${mazoAna}`)
+  check('beto no puede abrir el mazo de ana', betoAbre.status === 404, String(betoAbre.status))
 
-  const now = new Date()
-  const good = await answerCard(first, config, Rating.Good, 3200, now)
-  check('Bien la saca del estado nuevo', good.state !== CardState.New, String(good.state))
-  check('Bien la programa a futuro', good.due > now.getTime(), `${good.due} vs ${now.getTime()}`)
-  check('registra el repaso', (await db.revlog.count()) === 1)
+  const betoCola = await beto.get(`/mazos/${mazoAna}/cola`)
+  check('beto no puede pedir la cola de ana', betoCola.status === 404)
 
-  const logged = await db.revlog.orderBy('id').last()
-  check('guarda la duracion de la respuesta', logged?.durationMs === 3200, String(logged?.durationMs))
+  const betoRenombra = await beto.patch(`/mazos/${mazoAna}`, { name: 'secuestrado' })
+  check('beto no puede renombrar el mazo de ana', betoRenombra.status === 404)
 
-  const counts = await db.dayCounts.where('deckId').equals(deckId).first()
-  check('cuenta la tarjeta nueva del dia', counts?.newCount === 1, String(counts?.newCount))
+  const betoBorra = await beto.del(`/mazos/${mazoAna}`)
+  check('beto no puede borrar el mazo de ana', betoBorra.status === 404)
 
-  // Progresion real hasta el estado de repaso: se responde Bien hasta graduar.
-  let graduated = good
-  let step = new Date(now)
-  for (let i = 0; i < 5 && graduated.state !== CardState.Review; i++) {
-    step = new Date(graduated.due + 1000)
-    graduated = await answerCard(graduated, config, Rating.Good, 1000, step)
-  }
-  check('la tarjeta se gradua a repaso', graduated.state === CardState.Review, String(graduated.state))
-  // ts-fsrs usa learningSteps como indice de paso: al graduar debe volver a cero,
-  // porque si no la proxima falla no entra en reaprendizaje.
-  check('al graduar reinicia el indice de pasos', graduated.learningSteps === 0, String(graduated.learningSteps))
+  const colaAna = await ana.get(`/mazos/${mazoAna}/cola`)
+  const primeraTarjeta = colaAna.data.queue[0].card.id as number
+  const primeraNota = colaAna.data.queue[0].note.id as number
 
-  // Un Otra vez sobre una tarjeta en repaso debe reprogramarla en minutos, no en dias.
-  const lapseAt = new Date(graduated.due + 1000)
-  const lapsed = await answerCard(graduated, config, Rating.Again, 1500, lapseAt)
-  check('Otra vez manda a reaprendizaje', lapsed.state === CardState.Relearning, String(lapsed.state))
-  check('Otra vez reprograma dentro del dia', lapsed.due - lapseAt.getTime() < 86400000, String(lapsed.due - lapseAt.getTime()))
-  check('Otra vez incrementa los lapsos', lapsed.lapses === 1, String(lapsed.lapses))
+  const betoResponde = await beto.post(`/mazos/tarjetas/${primeraTarjeta}/responder`, {
+    grade: 3,
+    durationMs: 100,
+  })
+  check('beto no puede responder una tarjeta de ana', betoResponde.status === 404)
 
-  const easyCard = (await buildQueue((await db.decks.get(deckId))!))[0]
-  const easy = await answerCard(easyCard, config, Rating.Easy, 900, now)
-  const hardCard = (await buildQueue((await db.decks.get(deckId))!))[0]
-  const hard = await answerCard(hardCard, config, Rating.Hard, 900, now)
-  check('Facil da un intervalo mayor que Dificil', easy.due > hard.due, `${easy.due} vs ${hard.due}`)
+  const betoBorraNota = await beto.del(`/mazos/notas/${primeraNota}`)
+  check('beto no puede borrar una nota de ana', betoBorraNota.status === 404)
 
-  console.log('\nEstadisticas')
-  const stats = await deckStats((await db.decks.get(deckId))!)
-  check('cuenta el total de tarjetas', stats.total === 10, String(stats.total))
-  check('suma nuevas + aprendiendo + repaso = total', stats.newCount + stats.learningCount + stats.reviewCount === stats.total, `${stats.newCount}+${stats.learningCount}+${stats.reviewCount}`)
+  const betoReinicia = await beto.post('/mazos/tarjetas/reiniciar', { ids: [primeraTarjeta] })
+  check('reiniciar tarjetas ajenas no cambia nada', betoReinicia.data?.changed === 0)
+
+  const betoSuspende = await beto.post('/mazos/tarjetas/suspender', {
+    ids: [primeraTarjeta],
+    suspended: true,
+  })
+  check('suspender tarjetas ajenas no cambia nada', betoSuspende.data?.changed === 0)
+
+  const betoArchivo = await fetch(
+    `${BASE}/api/importaciones/${historial.data.imports[0].id}/archivo`,
+    { headers: { Cookie: beto.cookie } },
+  )
+  check('beto no puede descargar el archivo de ana', betoArchivo.status === 404, String(betoArchivo.status))
+
+  console.log('\nEstudio')
+  check('la cola trae las 10 nuevas', colaAna.data.queue.length === 10, String(colaAna.data.queue.length))
+  check('la cola trae los intervalos previstos', Object.keys(colaAna.data.queue[0].preview).length === 4)
+  check('la tarjeta arranca como nueva', colaAna.data.queue[0].card.state === 0)
+
+  const mala = await ana.post(`/mazos/tarjetas/${primeraTarjeta}/responder`, { grade: 9 })
+  check('rechaza una calificacion invalida', mala.status === 400, String(mala.status))
+
+  const bien = await ana.post(`/mazos/tarjetas/${primeraTarjeta}/responder`, {
+    grade: 3,
+    durationMs: 3200,
+  })
+  check('Bien saca la tarjeta del estado nuevo', bien.data?.card?.state !== 0)
+  check('Bien la programa a futuro', bien.data?.card?.due > Date.now())
+
+  const limitado = await ana.patch(`/mazos/${mazoAna}`, {
+    config: { newPerDay: 3, reviewsPerDay: 200, requestRetention: 0.9 },
+  })
+  check('guarda la configuracion del mazo', limitado.data?.deck?.config?.newPerDay === 3)
+
+  const colaLimitada = await ana.get(`/mazos/${mazoAna}/cola`)
+  // Ya se consumio una nueva hoy, asi que del tope de 3 quedan 2.
+  const nuevasEnCola = colaLimitada.data.queue.filter((q: any) => q.card.state === 0).length
+  check('respeta el limite diario de nuevas', nuevasEnCola === 2, String(nuevasEnCola))
+
+  const stats = await ana.get('/estadisticas')
+  check('las estadisticas cuentan el repaso', stats.data?.reviews === 1, String(stats.data?.reviews))
+  check('la racha arranca en 1', stats.data?.streak === 1)
+  check('el reparto suma las 10 tarjetas', stats.data?.totalCards === 10)
+
+  const statsBeto = await beto.get('/estadisticas')
+  check('beto ve sus propias estadisticas vacias', statsBeto.data?.reviews === 0 && statsBeto.data?.totalCards === 0)
 
   console.log('\nRespaldo')
-  const backup = await exportBackup()
-  check('exporta el mazo', backup.decks.length === 1)
-  check('exporta las notas', backup.notes.length === 10, String(backup.notes.length))
-  check('exporta el historial completo', backup.revlog.length === (await db.revlog.count()), String(backup.revlog.length))
+  const respaldo = await ana.get('/respaldo')
+  check('el respaldo trae el mazo', respaldo.data?.decks?.length === 1)
+  check('el respaldo trae las notas', respaldo.data?.notes?.length === 10)
 
-  const restored = await restoreBackup(backup, false)
-  check('restaura sumando al contenido actual', restored.notes === 10 && (await db.notes.count()) === 20, String(await db.notes.count()))
+  const restaurado = await beto.post('/respaldo', {
+    decks: respaldo.data.decks,
+    notes: respaldo.data.notes.map((n: any) => ({ ...n, deckId: n.deck_id })),
+  })
+  check('beto puede restaurar un respaldo en su cuenta', restaurado.data?.decks === 1, JSON.stringify(restaurado.data))
+  check('la restauracion crea las notas', restaurado.data?.notes === 10, String(restaurado.data?.notes))
 
-  await restoreBackup(backup, true)
-  check('restaura reemplazando todo', (await db.notes.count()) === 10, String(await db.notes.count()))
-  check('mantiene la integridad de las tarjetas', (await db.cards.count()) === 10, String(await db.cards.count()))
+  const mazosBeto = await beto.get('/mazos')
+  check('el mazo restaurado es de beto', mazosBeto.data?.decks?.length === 1)
+  check('y es distinto del de ana', mazosBeto.data.decks[0].id !== mazoAna)
 
-  const noteIds = new Set((await db.notes.toArray()).map((n) => n.id!))
-  const deckIds = new Set((await db.decks.toArray()).map((d) => d.id!))
-  const restoredCards = await db.cards.toArray()
-  const orphans = restoredCards.filter((c) => !noteIds.has(c.noteId) || !deckIds.has(c.deckId))
-  check('no quedan tarjetas huerfanas', orphans.length === 0, String(orphans.length))
+  console.log('\nCierre de sesion')
+  const malPass = new Cliente()
+  const rechazo = await malPass.post('/auth/entrar', {
+    email: 'ana@ejemplo.com',
+    password: 'incorrecta-123',
+  })
+  check('rechaza una contraseña incorrecta', rechazo.status === 401, String(rechazo.status))
+
+  const salida = await ana.post('/auth/salir')
+  check('cierra la sesion', salida.status === 200)
+  const trasSalir = await ana.get('/mazos')
+  check('tras salir la API responde 401', trasSalir.status === 401, String(trasSalir.status))
 
   console.log(failures === 0 ? '\nTodo en orden.\n' : `\n${failures} verificaciones fallaron.\n`)
-  process.exit(failures === 0 ? 0 : 1)
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+main()
+  .catch((error) => {
+    console.error(error)
+    failures++
+  })
+  .finally(() => {
+    server?.kill('SIGTERM')
+    rmSync(DATA_DIR, { recursive: true, force: true })
+    process.exit(failures === 0 ? 0 : 1)
+  })

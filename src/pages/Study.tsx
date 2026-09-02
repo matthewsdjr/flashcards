@@ -1,24 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { db, type Card as CardRow, type Deck, type Note } from '../db/schema'
-import { answerCard, buildQueue } from '../db/queries'
-import {
-  GRADES,
-  GRADE_KEYS,
-  GRADE_LABELS,
-  GRADE_RULE,
-  GRADE_TEXT,
-  preview,
-  type Grade,
-} from '../lib/scheduler'
-import { Button, EmptyState, Panel, Spinner, Stat, Tag } from '../components/ui'
-import { cx } from '../lib/classnames'
-import { formatDuration, formatInterval } from '../lib/format'
-
-interface QueueItem {
-  card: CardRow
-  note: Note
-}
+import { api } from '../api/cliente.ts'
+import { Button, EmptyState, Panel, Spinner, Stat, Tag } from '../components/ui.tsx'
+import { cx } from '../lib/classnames.ts'
+import { formatDuration, formatInterval } from '../lib/format.ts'
+import { GRADES, GRADE_KEYS, GRADE_LABELS, GRADE_RULE, GRADE_TEXT } from '../lib/calificaciones.ts'
+import type { Card, Deck, QueueItem } from '../../shared/tipos.ts'
+import type { Grade } from '../../shared/fsrs.ts'
 
 interface SessionStats {
   reviewed: number
@@ -34,6 +22,7 @@ export default function Study() {
   const [deck, setDeck] = useState<Deck | null>(null)
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [revealed, setRevealed] = useState(false)
   const [showHint, setShowHint] = useState(false)
   const [stats, setStats] = useState<SessionStats>({ reviewed: 0, again: 0, timeMs: 0 })
@@ -42,25 +31,19 @@ export default function Study() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const found = await db.decks.get(deckId)
-    if (!found) {
-      setDeck(null)
+    try {
+      const data = await api.get<{ deck: Deck; queue: QueueItem[] }>(`/mazos/${deckId}/cola`)
+      setDeck(data.deck)
+      setQueue(data.queue)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cargar la sesion')
+    } finally {
+      setRevealed(false)
+      setShowHint(false)
+      shownAt.current = Date.now()
       setLoading(false)
-      return
     }
-    setDeck(found)
-    const cards = await buildQueue(found)
-    const notes = await db.notes.bulkGet(cards.map((c) => c.noteId))
-    const items: QueueItem[] = []
-    cards.forEach((card, index) => {
-      const note = notes[index]
-      if (note) items.push({ card, note })
-    })
-    setQueue(items)
-    setRevealed(false)
-    setShowHint(false)
-    shownAt.current = Date.now()
-    setLoading(false)
   }, [deckId])
 
   useEffect(() => {
@@ -70,22 +53,26 @@ export default function Study() {
   const current = queue[0]
 
   const options = useMemo(() => {
-    if (!current || !deck || !revealed) return null
-    const now = new Date()
-    const log = preview(current.card, deck.config, now)
+    if (!current || !revealed) return null
+    const now = Date.now()
     return GRADES.map((grade) => ({
       grade,
-      interval: formatInterval(now.getTime(), log[grade].card.due.getTime()),
+      // El servidor manda la fecha prevista de cada opcion junto con la cola.
+      interval: formatInterval(now, current.preview[grade] ?? now),
     }))
-  }, [current, deck, revealed])
+  }, [current, revealed])
 
   const handleAnswer = useCallback(
     async (grade: Grade) => {
-      if (!current || !deck || answering.current) return
+      if (!current || answering.current) return
       answering.current = true
       const duration = Date.now() - shownAt.current
+      const item = current
       try {
-        const updated = await answerCard(current.card, deck.config, grade, duration)
+        const { card } = await api.post<{ card: Card }>(
+          `/mazos/tarjetas/${item.card.id}/responder`,
+          { grade, durationMs: duration },
+        )
         setStats((s) => ({
           reviewed: s.reviewed + 1,
           again: s.again + (grade === 1 ? 1 : 0),
@@ -93,23 +80,25 @@ export default function Study() {
         }))
         setQueue((prev) => {
           const rest = prev.slice(1)
-          // Si vuelve a vencer dentro de la sesion, se reinserta en orden de vencimiento.
-          if (updated.due <= Date.now() + 20 * 60 * 1000) {
-            const item = { card: updated, note: current.note }
-            const at = rest.findIndex((q) => q.card.due > updated.due)
-            if (at === -1) rest.push(item)
-            else rest.splice(at, 0, item)
+          // Si vuelve a vencer dentro de la sesion, se reinserta en su lugar.
+          if (card.due <= Date.now() + 20 * 60 * 1000) {
+            const updated: QueueItem = { ...item, card }
+            const at = rest.findIndex((q) => q.card.due > card.due)
+            if (at === -1) rest.push(updated)
+            else rest.splice(at, 0, updated)
           }
           return rest
         })
         setRevealed(false)
         setShowHint(false)
         shownAt.current = Date.now()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo registrar la respuesta')
       } finally {
         answering.current = false
       }
     },
-    [current, deck],
+    [current],
   )
 
   useEffect(() => {
@@ -147,7 +136,7 @@ export default function Study() {
     return (
       <EmptyState
         title="Ese mazo ya no existe"
-        description="Puede que lo hayas borrado desde otra pestaña."
+        description={error ?? 'Puede que lo hayas borrado desde otro dispositivo.'}
         action={
           <Link to="/">
             <Button variant="primary">Ver mis mazos</Button>
@@ -225,7 +214,7 @@ export default function Study() {
         radius="hero"
         className={cx(
           'relative mt-6 overflow-hidden transition',
-          // Antes de responder, tocar la ficha la da vuelta: es como funciona en papel.
+          // Antes de responder, tocar la ficha la da vuelta: es como en papel.
           !revealed && 'cursor-pointer hover:-translate-y-0.5',
         )}
       >
@@ -237,7 +226,8 @@ export default function Study() {
           tabIndex={revealed ? undefined : 0}
           aria-label={revealed ? undefined : 'Mostrar la respuesta'}
           onClick={() => !revealed && setRevealed(true)}
-          className="flex min-h-56 flex-col items-center justify-center gap-5 px-8 py-12 text-center focus-visible:outline-none sm:px-14">
+          className="flex min-h-56 flex-col items-center justify-center gap-5 px-8 py-12 text-center focus-visible:outline-none sm:px-14"
+        >
           <p className="card-face text-3xl leading-snug whitespace-pre-wrap text-ink sm:text-4xl">
             {question}
           </p>
@@ -309,6 +299,8 @@ export default function Study() {
           </div>
         )}
       </div>
+
+      {error && <p className="mt-4 text-center text-sm text-danger">{error}</p>}
 
       <p className="mt-5 text-center text-xs text-ink-3">
         {revealed

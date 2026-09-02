@@ -3,21 +3,30 @@ services:
     build:
       context: .
       args:
-        # Raiz del dominio. Cambialo si la servis desde un subdirectorio.
         BASE_PATH: /
     image: flashcards:latest
     container_name: flashcards
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "8080:3000"
+    environment:
+      # Poner en true si un proxy inverso con TLS queda por delante: hace que
+      # la cookie de sesion viaje como Secure y respeta X-Forwarded-For.
+      TRUST_PROXY: "false"
+      COOKIE_SECURE: "auto"
+    volumes:
+      - flashcards-datos:/app/datos
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/mazos/_ping"]
       interval: 30s
       timeout: 3s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  flashcards-datos:

@@ -1,19 +1,22 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db/schema'
-import { createDeck, deckStats, toStrength, type DeckStats } from '../db/queries'
-import {
-  Button,
-  EmptyState,
-  Field,
-  Panel,
-  SectionHeading,
-  Spinner,
-} from '../components/ui'
-import { StrengthLegend, StrengthStrip } from '../components/StrengthStrip'
-import { inputClass } from '../lib/classnames'
-import { pluralize } from '../lib/format'
+import { api } from '../api/cliente.ts'
+import { useAccion, useConsulta } from '../api/hooks.ts'
+import { Button, EmptyState, Field, Panel, SectionHeading, Spinner } from '../components/ui.tsx'
+import { AvisoMigracion } from '../components/AvisoMigracion.tsx'
+import { StrengthLegend, StrengthStrip } from '../components/StrengthStrip.tsx'
+import { inputClass } from '../lib/classnames.ts'
+import { pluralize } from '../lib/format.ts'
+import type { Deck, DeckWithStats } from '../../shared/tipos.ts'
+
+function toStrength(stats: DeckWithStats['stats']) {
+  return {
+    new: stats.newCount,
+    learning: stats.learningCount,
+    young: stats.youngCount,
+    mature: stats.matureCount,
+  }
+}
 
 export default function Decks() {
   const navigate = useNavigate()
@@ -21,26 +24,32 @@ export default function Decks() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
 
-  const data = useLiveQuery(async () => {
-    const decks = await db.decks.orderBy('createdAt').reverse().toArray()
-    const stats = await Promise.all(decks.map((deck) => deckStats(deck)))
-    const byId = new Map<number, DeckStats>(stats.map((s) => [s.deckId, s]))
-    return { decks, byId }
-  }, [])
+  const consulta = useConsulta(
+    () => api.get<{ decks: DeckWithStats[] }>('/mazos'),
+    [],
+  )
+  const { ejecutar, enviando, error } = useAccion()
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault()
     if (!name.trim()) return
-    const id = await createDeck(name, description)
+    const created = await ejecutar(() =>
+      api.post<{ deck: Deck }>('/mazos', { name, description }),
+    )
+    if (!created) return
     setName('')
     setDescription('')
     setCreating(false)
-    navigate(`/mazo/${id}`)
+    navigate(`/mazo/${created.deck.id}`)
   }
 
-  if (!data) return <Spinner />
+  if (consulta.cargando && !consulta.data) return <Spinner />
+  if (consulta.error) {
+    return <EmptyState title="No se pudieron cargar los mazos" description={consulta.error} />
+  }
 
-  const totalDue = data.decks.reduce((sum, d) => sum + (data.byId.get(d.id!)?.dueNow ?? 0), 0)
+  const decks = consulta.data?.decks ?? []
+  const totalDue = decks.reduce((sum, d) => sum + d.stats.dueNow, 0)
 
   return (
     <div className="space-y-8">
@@ -48,7 +57,7 @@ export default function Decks() {
         as="h1"
         title="Mis mazos"
         description={
-          data.decks.length === 0
+          decks.length === 0
             ? 'Importa un archivo o crea un mazo para empezar.'
             : totalDue > 0
               ? `Tenes ${pluralize(totalDue, 'tarjeta lista', 'tarjetas listas')} para repasar.`
@@ -65,6 +74,8 @@ export default function Decks() {
           </>
         }
       />
+
+      <AvisoMigracion onMigrado={consulta.recargar} />
 
       {creating && (
         <Panel className="p-5">
@@ -85,11 +96,12 @@ export default function Decks() {
                 onChange={(e) => setDescription(e.target.value)}
               />
             </Field>
+            {error && <p className="text-sm text-danger">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setCreating(false)}>
                 Cancelar
               </Button>
-              <Button type="submit" variant="primary" disabled={!name.trim()}>
+              <Button type="submit" variant="primary" disabled={!name.trim() || enviando}>
                 Crear mazo
               </Button>
             </div>
@@ -97,7 +109,7 @@ export default function Decks() {
         </Panel>
       )}
 
-      {data.decks.length === 0 && !creating ? (
+      {decks.length === 0 && !creating ? (
         <EmptyState
           title="Todavia no hay nada que estudiar"
           description="Importa un TSV o CSV exportado de Anki, Excel o Google Sheets, y las tarjetas quedan listas en segundos."
@@ -109,45 +121,45 @@ export default function Decks() {
         />
       ) : (
         <ul className="border-t border-rule">
-          {data.decks.map((deck) => {
-            const stats = data.byId.get(deck.id!)
-            const due = stats?.dueNow ?? 0
-            return (
-              <li key={deck.id} className="border-b border-rule">
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-4 py-5">
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      to={`/mazo/${deck.id}`}
-                      className="display text-lg font-medium text-ink transition hover:text-claret"
-                    >
-                      {deck.name}
-                    </Link>
-                    {deck.description && (
-                      <p className="mt-0.5 truncate text-sm text-ink-2">{deck.description}</p>
-                    )}
-                    <div className="mt-3 max-w-sm space-y-1.5">
-                      <StrengthStrip strength={toStrength(stats!)} />
-                      <StrengthLegend strength={toStrength(stats!)} />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-5">
-                    <div className="text-right">
-                      <p
-                        className={`display tnum text-3xl font-medium ${due > 0 ? 'text-claret' : 'text-ink-3'}`}
-                      >
-                        {due}
-                      </p>
-                      <p className="text-xs text-ink-2">para hoy</p>
-                    </div>
-                    <Link to={`/estudiar/${deck.id}`}>
-                      <Button variant={due > 0 ? 'primary' : 'secondary'}>Estudiar</Button>
-                    </Link>
+          {decks.map((deck) => (
+            <li key={deck.id} className="border-b border-rule">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-4 py-5">
+                <div className="min-w-0 flex-1">
+                  <Link
+                    to={`/mazo/${deck.id}`}
+                    className="display text-lg font-medium text-ink transition hover:text-claret"
+                  >
+                    {deck.name}
+                  </Link>
+                  {deck.description && (
+                    <p className="mt-0.5 truncate text-sm text-ink-2">{deck.description}</p>
+                  )}
+                  <div className="mt-3 max-w-sm space-y-1.5">
+                    <StrengthStrip strength={toStrength(deck.stats)} />
+                    <StrengthLegend strength={toStrength(deck.stats)} />
                   </div>
                 </div>
-              </li>
-            )
-          })}
+
+                <div className="flex items-center gap-5">
+                  <div className="text-right">
+                    <p
+                      className={`display tnum text-3xl font-medium ${
+                        deck.stats.dueNow > 0 ? 'text-claret' : 'text-ink-3'
+                      }`}
+                    >
+                      {deck.stats.dueNow}
+                    </p>
+                    <p className="text-xs text-ink-2">para hoy</p>
+                  </div>
+                  <Link to={`/estudiar/${deck.id}`}>
+                    <Button variant={deck.stats.dueNow > 0 ? 'primary' : 'secondary'}>
+                      Estudiar
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </li>
+          ))}
         </ul>
       )}
     </div>

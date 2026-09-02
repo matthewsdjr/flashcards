@@ -8,9 +8,16 @@ import { resolve } from 'node:path'
 import puppeteer, { type Page } from 'puppeteer-core'
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-const BASE = process.argv[2] ?? 'http://localhost:4173'
+const BASE = process.argv[2] ?? 'http://127.0.0.1:3997'
 const OUT = resolve(process.argv[3] ?? 'shots')
 const DECK = resolve('ejemplos/biologia-celular.tsv')
+
+// Cada corrida crea su propia cuenta, para no depender del estado del servidor.
+const CUENTA = {
+  email: `capturas-${Date.now()}@ejemplo.com`,
+  name: 'Capturas',
+  password: 'clave-de-prueba-123',
+}
 
 const errors: string[] = []
 
@@ -45,17 +52,30 @@ async function run(theme: 'light' | 'dark') {
   await page.evaluate((t) => localStorage.setItem('flashcards-theme', t), theme)
   await page.reload({ waitUntil: 'networkidle0' })
 
+  // Entrar a la cuenta. En el primer tema se crea; en el segundo ya existe.
+  await page.locator('input[type=email]').setTimeout(10000).wait()
+  await shot(page, `${theme}-0-entrar`)
+
+  const hayRegistro = await page.$('input[autocomplete=name]')
+  if (hayRegistro) {
+    await page.locator('input[autocomplete=name]').fill(CUENTA.name)
+  }
+  await page.locator('input[type=email]').fill(CUENTA.email)
+  await page.locator('input[type=password]').fill(CUENTA.password)
+  await clickText(page, 'button[type=submit]', hayRegistro ? 'Crear cuenta' : 'Entrar')
+  await page.locator('::-p-text(Mis mazos)').setTimeout(10000).wait()
+
   await shot(page, `${theme}-1-vacio`)
 
   // Importar el mazo de ejemplo por el flujo real de la interfaz.
   await page.goto(`${BASE}#/importar`, { waitUntil: 'networkidle0' })
   const input = await page.locator('input[type=file]').waitHandle()
   await input.uploadFile(DECK)
-  await page.locator('table').setTimeout(8000).wait()
+  await page.locator('table').setTimeout(15000).wait()
   await shot(page, `${theme}-2-importar`)
 
-  await clickText(page, 'button', 'Importar')
-  await page.locator('::-p-text(Listo para estudiar)').setTimeout(8000).wait()
+  await clickText(page, 'button', 'Importar 10 filas')
+  await page.locator('::-p-text(Listo para estudiar)').setTimeout(15000).wait()
   await shot(page, `${theme}-3-importado`)
 
   await page.goto(`${BASE}#/`, { waitUntil: 'networkidle0' })
@@ -83,7 +103,7 @@ async function run(theme: 'light' | 'dark') {
   await shot(page, `${theme}-7-progreso`)
 
   await page.goto(`${BASE}#/`, { waitUntil: 'networkidle0' })
-  await clickText(page, 'a', 'biologia-celular')
+  await clickText(page, 'a', 'biologia')
   await new Promise((r) => setTimeout(r, 500))
   await shot(page, `${theme}-8-mazo`)
 

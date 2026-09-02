@@ -1,19 +1,50 @@
 # Flashcards
 
-Aplicación web para estudiar con repetición espaciada, al estilo de Anki. Importás tus mazos desde archivos **TSV o CSV**, estudiás con el algoritmo **FSRS** (el mismo que usa Anki hoy) y todo se guarda en tu navegador — no hay servidor, no hay cuentas, no se envía nada a ningún lado.
+Aplicación web para estudiar con repetición espaciada, al estilo de Anki. Importás tus mazos desde archivos **TSV o CSV**, estudiás con el algoritmo **FSRS** (el mismo que usa Anki hoy) y todo queda guardado en tu cuenta, en tu propio servidor.
 
 ## Características
 
+- **Cuentas con registro por invitación.** El registro está cerrado: sólo quien tenga un código puede crear cuenta. La primera cuenta del servidor queda como administradora y es la que reparte los códigos.
+- **Tus mazos te siguen a cualquier dispositivo.** El servidor es la fuente de verdad; entrás desde el teléfono o la laptop y encontrás el mismo progreso.
 - **Importación TSV / CSV** con detección automática del separador (tab, coma, punto y coma, barra vertical) y del encabezado. Ignora el preámbulo `#separator:tab` que agrega Anki en sus exportaciones.
 - **Mapeo visual de columnas**: elegís qué columna es el frente, el reverso, la pista, las notas adicionales o las etiquetas.
-- **FSRS** vía [`ts-fsrs`](https://github.com/open-spaced-repetition/ts-fsrs), con cuatro botones (Otra vez / Difícil / Bien / Fácil) y el intervalo previsto en cada uno.
-- **Límites diarios** por mazo para tarjetas nuevas y repasos, igual que en Anki.
+- **Se guarda el archivo original** de cada importación. Podés volver a descargarlo o reimportarlo con otro mapeo si te equivocaste.
+- **FSRS** vía [`ts-fsrs`](https://github.com/open-spaced-repetition/ts-fsrs), con cuatro botones (Otra vez / Difícil / Bien / Fácil) y el intervalo previsto en cada uno. La programación se calcula en el servidor.
+- **Límites diarios** por mazo para tarjetas nuevas y repasos, calculados en tu zona horaria.
 - **Detección de duplicados** al reimportar: podés omitir, actualizar o forzar el alta.
 - **Tarjetas inversas** opcionales (se estudia también respuesta → pregunta).
-- **Estadísticas**: repasos por día, porcentaje de aciertos, tiempo de estudio y carga proyectada.
+- **Progreso**: repasos por día, porcentaje de aciertos, tiempo de estudio, racha y carga proyectada.
 - **Respaldo completo** en JSON y exportación de cualquier mazo de vuelta a TSV.
 - **Atajos de teclado**: `Espacio` muestra la respuesta y luego califica *Bien*; `1`–`4` califican directo; `H` muestra la pista. También podés tocar la ficha para darla vuelta.
 - Interfaz en español, responsive, con tema claro, oscuro o automático.
+
+## Poner en marcha un servidor
+
+```bash
+docker compose up -d --build
+```
+
+La app queda en el puerto **8080**. Entrá por primera vez y creá tu cuenta: **la primera cuenta no necesita invitación y queda como administradora**. Desde ahí, la pestaña *Invitaciones* genera los códigos para el resto.
+
+Los datos viven en el volumen `flashcards-datos` (la base SQLite y los archivos importados). Para respaldarlo:
+
+```bash
+docker run --rm -v flashcards-datos:/datos -v "$PWD":/salida alpine \
+  tar czf /salida/flashcards-datos.tgz -C /datos .
+```
+
+### Detrás de un proxy inverso con HTTPS
+
+En `docker-compose.yml`, poné `TRUST_PROXY: "true"`. Con eso la cookie de sesión viaja como `Secure` y el límite de peticiones usa la IP real del visitante en lugar de la del proxy.
+
+## Desplegar
+
+```bash
+./deploy.sh                                    # matthewsdjr@100.118.186.97, rama main
+./deploy.sh usuario@otro-host apps/flashcards  # o el destino que quieras
+```
+
+El servidor trae el código **de GitHub por su cuenta** y reconstruye el contenedor; el script sólo dispara el proceso y espera a que el contenedor quede `healthy`. No hace falta que tu computadora tenga el repo: podés entrar por SSH y correr `cd ~/apps/flashcards && git pull && docker compose up -d --build` directamente.
 
 ## Formato de los archivos
 
@@ -35,48 +66,19 @@ En `ejemplos/` hay dos mazos listos para probar.
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm test         # prueba de humo del núcleo sobre un IndexedDB simulado
-npm run build    # genera dist/
-npm run preview  # sirve dist/ localmente
-npm run shots    # recorre la app en Chrome y guarda capturas en shots/
+npm run dev:server   # API en http://localhost:3000
+npm run dev          # cliente en http://localhost:5173, con proxy a la API
+npm test             # prueba de humo de la API sobre una base descartable
+npm run build        # compila cliente (dist/) y servidor (dist-server/)
+npm run shots        # recorre la app en Chrome y guarda capturas en shots/
 npm run lint
 ```
 
-Requiere Node 22 o superior. `npm run shots` levanta Chrome, importa un mazo de ejemplo, estudia unas tarjetas y guarda capturas en claro y oscuro, incluida la vista móvil; falla si aparece cualquier error de consola. Acepta una URL como argumento para revisar un despliegue: `npm run shots -- http://100.118.186.97:8080`.
+Requiere Node 22 o superior para desarrollo; el contenedor usa Node 24, donde `node:sqlite` es estable y no hace falta ninguna dependencia compilada.
 
-## Despliegue
+`npm test` levanta un servidor real contra una base temporal y verifica autenticación, invitaciones, importación, estudio, respaldo y —sobre todo— que una cuenta no pueda alcanzar los datos de otra.
 
-### Tu servidor (producción)
-
-```bash
-./deploy.sh                                  # usa matthewsdjr@100.118.186.97:~/apps/flashcards
-./deploy.sh usuario@otro-host ~/ruta/destino # o el destino que quieras
-```
-
-El script sincroniza el código con `rsync`, reconstruye la imagen en el servidor y espera a que el contenedor quede `healthy` antes de dar por buena la publicación. La app queda en el **puerto 8080**.
-
-Si preferís hacerlo a mano, en el servidor alcanza con:
-
-```bash
-docker compose up -d --build
-```
-
-La imagen es multi-etapa: compila con Node y sirve los estáticos con nginx (gzip, cache inmutable para los assets con hash, `no-cache` para el HTML y cabeceras de seguridad). `restart: unless-stopped` la levanta sola tras un reinicio.
-
-Para exponerla hacia afuera, apuntá tu proxy inverso o tu túnel de Cloudflare al puerto `80` del contenedor.
-
-### GitHub Pages (entorno de pruebas)
-
-Cada push a `main` dispara `.github/workflows/deploy.yml`, que compila con `BASE_PATH=/<repo>/` y publica en https://matthewsdjr.github.io/flashcards/.
-
-### Hosting estático sin Docker
-
-```bash
-npm run build
-```
-
-y subís el contenido de `dist/` al directorio público. La app usa `HashRouter`, así que no hace falta configurar reescrituras de URL.
+`npm run shots` levanta Chrome, crea una cuenta, importa un mazo, estudia y recorre el progreso en claro y oscuro más la vista móvil; falla si aparece cualquier error de consola. Acepta una URL para revisar un despliegue: `npm run shots -- http://100.118.186.97:8080`.
 
 ## Diseño
 
@@ -91,30 +93,43 @@ La interfaz está anclada en el fichero de biblioteca: fichas de cartulina, regl
 ## Arquitectura
 
 ```
+shared/          Contrato entre cliente y servidor
+├── tipos.ts     Mazos, notas, tarjetas, respuestas de la API
+├── fsrs.ts      Envoltorio sobre ts-fsrs
+└── parse.ts     Parser TSV/CSV y heurísticas de mapeo
+
+server/
+├── index.ts     Fastify: middlewares, estáticos, arranque
+├── db.ts        SQLite (node:sqlite) y migraciones
+├── auth.ts      scrypt, sesiones e invitaciones
+├── contexto.ts  Sesión de la petición, permisos, zona horaria
+├── datos.ts     Consultas por usuario: mazos, colas, calificación
+└── rutas/       auth, mazos, importaciones, estadísticas e invitaciones
+
 src/
-├── db/
-│   ├── schema.ts     Dexie: mazos, notas, tarjetas, revlog, contadores diarios
-│   └── queries.ts    Colas de estudio, límites diarios, calificación de tarjetas
-├── lib/
-│   ├── scheduler.ts  Envoltorio sobre ts-fsrs (FSRS)
-│   ├── parse.ts      Parser TSV/CSV y heurísticas de mapeo
-│   ├── import.ts     Alta de notas y generación de tarjetas
-│   ├── backup.ts     Export/import JSON y exportación TSV
-│   ├── theme.ts      Tema claro / oscuro / automático
-│   └── format.ts     Formato de intervalos y fechas
-├── components/
-│   ├── ui.tsx           Componentes de interfaz compartidos
-│   └── StrengthStrip    La franja de memoria
-└── pages/            Mazos, detalle, importación, estudio, progreso, ajustes
+├── api/         Cliente HTTP y hooks de consulta
+├── auth/        Contexto de sesión
+├── components/  Interfaz compartida y la franja de memoria
+├── lib/         Tema, formato, clases y migración desde IndexedDB
+└── pages/       Entrar, mazos, detalle, importación, estudio, progreso, ajustes, invitaciones
 ```
 
-Los datos viven en IndexedDB bajo la base `flashcards`. El acceso está concentrado en `src/db/`, de modo que agregar un backend con sincronización más adelante implica reemplazar esa capa sin tocar las páginas.
+### Cómo se aísla una cuenta de otra
+
+Cada fila de contenido lleva `user_id`, y **toda consulta lo incluye en el `WHERE`**: nunca se busca una fila sólo por su identificador. Así, adivinar el id de un mazo ajeno devuelve 404 en lugar de datos. La prueba de humo verifica este comportamiento explícitamente para leer, renombrar, borrar, responder tarjetas y descargar archivos.
+
+Las contraseñas se guardan con **scrypt** (`node:crypto`, sin dependencias nativas). El token de sesión viaja en una cookie `httpOnly` y en la base se guarda sólo su hash SHA-256, así que leer la tabla de sesiones no alcanza para suplantar a nadie. Cambiar la contraseña cierra las demás sesiones abiertas.
+
+## Migrar desde la versión anterior
+
+Si usaste la versión que guardaba todo en el navegador, al entrar por primera vez la app detecta esos mazos y ofrece subirlos a tu cuenta. El historial de repasos no se conserva: las tarjetas empiezan como nuevas. Después de migrar, la copia local se borra para no dejar dos verdades.
 
 ## Limitaciones actuales
 
-- Los datos son **por navegador**: no hay sincronización entre dispositivos. Usá el respaldo JSON para mudarte de equipo.
+- Hace falta conexión con el servidor: no hay modo sin conexión.
 - El contenido de las tarjetas se muestra como texto plano; no se renderiza HTML ni imágenes.
 - No se importan archivos `.apkg` de Anki (son un ZIP con una base SQLite adentro).
+- No hay recuperación de contraseña por email: si alguien la pierde, se le crea una cuenta nueva con otra invitación.
 
 ## Licencia
 

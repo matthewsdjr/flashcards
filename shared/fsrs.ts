@@ -9,44 +9,16 @@ import {
   type RecordLog,
   type StepUnit,
 } from 'ts-fsrs'
-import type { Card, DeckConfig } from '../db/schema'
+import type { Card, CardStateValue, DeckConfig } from './tipos.ts'
 
 export { Rating }
 export type { Grade }
 
-/** Las cuatro respuestas posibles, en el orden en que se muestran los botones. */
+/** Las cuatro respuestas posibles, en el orden en que se muestran. */
 export const GRADES: Grade[] = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy]
 
-export const GRADE_LABELS: Record<Grade, string> = {
-  [Rating.Again]: 'Otra vez',
-  [Rating.Hard]: 'Dificil',
-  [Rating.Good]: 'Bien',
-  [Rating.Easy]: 'Facil',
-}
-
-export const GRADE_KEYS: Record<Grade, string> = {
-  [Rating.Again]: '1',
-  [Rating.Hard]: '2',
-  [Rating.Good]: '3',
-  [Rating.Easy]: '4',
-}
-
-/*
- * Los botones de calificacion no se rellenan de color: llevan un filete
- * inferior y el texto teñido. Asi se escanean igual sin competir con la ficha.
- */
-export const GRADE_RULE: Record<Grade, string> = {
-  [Rating.Again]: 'border-b-again hover:bg-again/5',
-  [Rating.Hard]: 'border-b-hard hover:bg-hard/5',
-  [Rating.Good]: 'border-b-good hover:bg-good/5',
-  [Rating.Easy]: 'border-b-easy hover:bg-easy/5',
-}
-
-export const GRADE_TEXT: Record<Grade, string> = {
-  [Rating.Again]: 'text-again',
-  [Rating.Hard]: 'text-hard',
-  [Rating.Good]: 'text-good',
-  [Rating.Easy]: 'text-easy',
+export function isGrade(value: unknown): value is Grade {
+  return GRADES.includes(value as Grade)
 }
 
 function toSteps(steps: string[]): StepUnit[] {
@@ -66,7 +38,6 @@ export function schedulerFor(config: DeckConfig) {
   )
 }
 
-/** Convierte una tarjeta almacenada al formato que espera ts-fsrs. */
 export function toFsrsCard(card: Card): FsrsCard {
   return {
     due: new Date(card.due),
@@ -82,7 +53,6 @@ export function toFsrsCard(card: Card): FsrsCard {
   }
 }
 
-/** Vuelca el resultado de ts-fsrs sobre el registro persistido. */
 export function applyFsrsCard(card: Card, next: FsrsCard): Card {
   return {
     ...card,
@@ -94,18 +64,15 @@ export function applyFsrsCard(card: Card, next: FsrsCard): Card {
     learningSteps: next.learning_steps,
     reps: next.reps,
     lapses: next.lapses,
-    state: next.state as Card['state'],
+    state: next.state as CardStateValue,
     lastReview: next.last_review ? next.last_review.getTime() : null,
   }
 }
 
-/** Tarjeta nueva lista para persistir. */
-export function newCard(noteId: number, deckId: number, reverse: 0 | 1, now = new Date()): Card {
+/** Valores de una tarjeta nueva, sin identidad todavia. */
+export function emptyCardFields(now = new Date()) {
   const empty = createEmptyCard(now)
   return {
-    noteId,
-    deckId,
-    reverse,
     due: empty.due.getTime(),
     stability: empty.stability,
     difficulty: empty.difficulty,
@@ -114,13 +81,20 @@ export function newCard(noteId: number, deckId: number, reverse: 0 | 1, now = ne
     learningSteps: empty.learning_steps,
     reps: empty.reps,
     lapses: empty.lapses,
-    state: empty.state as Card['state'],
-    lastReview: null,
-    suspended: 0,
+    state: empty.state as CardStateValue,
+    lastReview: null as number | null,
+    suspended: 0 as 0 | 1,
   }
 }
 
-/** Previsualiza las cuatro opciones para mostrar el intervalo en cada boton. */
-export function preview(card: Card, config: DeckConfig, now = new Date()): RecordLog {
-  return schedulerFor(config).repeat(toFsrsCard(card), now)
+/** Las cuatro opciones con su fecha de vencimiento, para pintar los botones. */
+export function previewDue(
+  card: Card,
+  config: DeckConfig,
+  now = new Date(),
+): Record<number, number> {
+  const log: RecordLog = schedulerFor(config).repeat(toFsrsCard(card), now)
+  const out: Record<number, number> = {}
+  for (const grade of GRADES) out[grade] = log[grade].card.due.getTime()
+  return out
 }

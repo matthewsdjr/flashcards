@@ -3,18 +3,20 @@ name: CI
 on:
   pull_request:
   push:
-    branches-ignore: [main]
+    branches: [main]
 
 jobs:
-  check:
+  verificar:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run lint
-      - run: npm test
-      - run: npm run build
+      - name: Pruebas de la API
+        run: npm test
+      - name: Compilar cliente y servidor
+        run: npm run build

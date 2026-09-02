@@ -1,5 +1,9 @@
 node_modules
 dist
+dist-server
+datos
 .git
 .github
+shots
+*.log
 *.md

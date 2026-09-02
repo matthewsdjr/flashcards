@@ -1,19 +1,16 @@
 import { HashRouter, NavLink, Route, Routes } from 'react-router-dom'
-import Decks from './pages/Decks'
-import DeckDetail from './pages/DeckDetail'
-import Import from './pages/Import'
-import Study from './pages/Study'
-import Stats from './pages/Stats'
-import Settings from './pages/Settings'
-import { cx } from './lib/classnames'
-import { useTheme, type Theme } from './lib/theme'
-
-const NAV = [
-  { to: '/', label: 'Mazos', end: true },
-  { to: '/importar', label: 'Importar', end: false },
-  { to: '/estadisticas', label: 'Progreso', end: false },
-  { to: '/ajustes', label: 'Ajustes', end: false },
-]
+import Decks from './pages/Decks.tsx'
+import DeckDetail from './pages/DeckDetail.tsx'
+import Import from './pages/Import.tsx'
+import Study from './pages/Study.tsx'
+import Stats from './pages/Stats.tsx'
+import Settings from './pages/Settings.tsx'
+import Entrar from './pages/Entrar.tsx'
+import Invitaciones from './pages/Invitaciones.tsx'
+import { cx } from './lib/classnames.ts'
+import { useTheme, type Theme } from './lib/theme.ts'
+import { ProveedorSesion, useSesion } from './auth/SesionContext.tsx'
+import { Spinner } from './components/ui.tsx'
 
 const THEMES: { value: Theme; label: string; title: string }[] = [
   { value: 'light', label: 'Claro', title: 'Tema claro' },
@@ -49,6 +46,16 @@ function ThemeToggle() {
 }
 
 function Shell() {
+  const { usuario, salir } = useSesion()
+
+  const nav = [
+    { to: '/', label: 'Mazos', end: true },
+    { to: '/importar', label: 'Importar', end: false },
+    { to: '/estadisticas', label: 'Progreso', end: false },
+    { to: '/ajustes', label: 'Ajustes', end: false },
+    ...(usuario?.isAdmin ? [{ to: '/invitaciones', label: 'Invitaciones', end: false }] : []),
+  ]
+
   return (
     <div className="min-h-dvh">
       <header className="border-b border-rule bg-paper">
@@ -60,12 +67,23 @@ function Shell() {
           </NavLink>
 
           {/* En movil el selector de tema sube junto al logo y la navegacion baja. */}
-          <div className="ml-auto sm:order-last">
+          <div className="ml-auto flex items-center gap-3 sm:order-last">
             <ThemeToggle />
+            <div className="flex items-center gap-2 border-l border-rule pl-3">
+              <span className="hidden max-w-32 truncate text-sm text-ink-2 sm:inline">
+                {usuario?.name}
+              </span>
+              <button
+                onClick={() => void salir()}
+                className="rounded text-sm font-medium text-ink-2 transition hover:text-claret"
+              >
+                Salir
+              </button>
+            </div>
           </div>
 
-          <nav className="order-last flex w-full items-center gap-5 text-sm sm:order-none sm:-mb-3.5 sm:w-auto">
-            {NAV.map((item) => (
+          <nav className="order-last flex w-full flex-wrap items-center gap-5 text-sm sm:order-none sm:-mb-3.5 sm:w-auto">
+            {nav.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -83,7 +101,6 @@ function Shell() {
               </NavLink>
             ))}
           </nav>
-
         </div>
       </header>
 
@@ -95,17 +112,26 @@ function Shell() {
           <Route path="/estudiar/:deckId" element={<Study />} />
           <Route path="/estadisticas" element={<Stats />} />
           <Route path="/ajustes" element={<Settings />} />
+          <Route path="/invitaciones" element={<Invitaciones />} />
         </Routes>
       </main>
     </div>
   )
 }
 
+function Puerta() {
+  const { usuario, cargando } = useSesion()
+  if (cargando) return <Spinner label="Cargando" />
+  return usuario ? <Shell /> : <Entrar />
+}
+
 export default function App() {
-  // HashRouter evita configurar reescrituras en GitHub Pages y en nginx.
+  // HashRouter evita configurar reescrituras en el servidor.
   return (
     <HashRouter>
-      <Shell />
+      <ProveedorSesion>
+        <Puerta />
+      </ProveedorSesion>
     </HashRouter>
   )
 }

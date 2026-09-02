@@ -1,17 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { CardState, DEFAULT_DECK_CONFIG, db, type DeckConfig } from '../db/schema'
-import {
-  MATURE_DAYS,
-  deckStats,
-  deleteDeck,
-  deleteNote,
-  notesOfDeck,
-  resetCards,
-  setSuspended,
-  toStrength,
-} from '../db/queries'
+import { api, descargar } from '../api/cliente.ts'
+import { useAccion, useConsulta } from '../api/hooks.ts'
 import {
   Button,
   Checkbox,
@@ -21,11 +11,25 @@ import {
   Spinner,
   Stat,
   Tag,
-} from '../components/ui'
-import { StrengthLegend, StrengthStrip } from '../components/StrengthStrip'
-import { cx, inputClass } from '../lib/classnames'
-import { downloadText, exportDeckTsv } from '../lib/backup'
-import { formatDate } from '../lib/format'
+} from '../components/ui.tsx'
+import { StrengthLegend, StrengthStrip } from '../components/StrengthStrip.tsx'
+import { cx, inputClass } from '../lib/classnames.ts'
+import { formatDate } from '../lib/format.ts'
+import {
+  CardState,
+  DEFAULT_DECK_CONFIG,
+  MATURE_DAYS,
+  type Deck,
+  type DeckConfig,
+  type DeckStats,
+  type NoteWithCards,
+} from '../../shared/tipos.ts'
+
+interface Respuesta {
+  deck: Deck
+  stats: DeckStats
+  notes: NoteWithCards[]
+}
 
 /** Etiqueta y color de una tarjeta segun su lugar en la rampa de memoria. */
 function cardState(state: number, scheduledDays: number) {
@@ -37,6 +41,15 @@ function cardState(state: number, scheduledDays: number) {
     : { label: 'sabida', color: 'bg-m-young' }
 }
 
+function toStrength(stats: DeckStats) {
+  return {
+    new: stats.newCount,
+    learning: stats.learningCount,
+    young: stats.youngCount,
+    mature: stats.matureCount,
+  }
+}
+
 export default function DeckDetail() {
   const { deckId: deckIdParam } = useParams()
   const deckId = Number(deckIdParam)
@@ -46,30 +59,27 @@ export default function DeckDetail() {
   const [editingConfig, setEditingConfig] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  const data = useLiveQuery(async () => {
-    const deck = await db.decks.get(deckId)
-    if (!deck) return null
-    const [notes, stats] = await Promise.all([notesOfDeck(deckId), deckStats(deck)])
-    return { deck, notes, stats }
-  }, [deckId])
+  const consulta = useConsulta(() => api.get<Respuesta>(`/mazos/${deckId}`), [deckId])
+  const { ejecutar, enviando } = useAccion()
 
   const filtered = useMemo(() => {
-    if (!data) return []
+    const notes = consulta.data?.notes ?? []
     const q = query.trim().toLowerCase()
-    if (!q) return data.notes
-    return data.notes.filter(
+    if (!q) return notes
+    return notes.filter(
       ({ note }) =>
         note.front.toLowerCase().includes(q) ||
         note.back.toLowerCase().includes(q) ||
         note.tags.some((t) => t.toLowerCase().includes(q)),
     )
-  }, [data, query])
+  }, [consulta.data, query])
 
-  if (data === undefined) return <Spinner />
-  if (data === null) {
+  if (consulta.cargando && !consulta.data) return <Spinner />
+  if (!consulta.data) {
     return (
       <div className="py-16 text-center">
         <h1 className="display text-2xl font-medium">Ese mazo ya no existe</h1>
+        {consulta.error && <p className="mt-2 text-sm text-ink-2">{consulta.error}</p>}
         <div className="mt-6">
           <Link to="/">
             <Button variant="primary">Ver mis mazos</Button>
@@ -79,7 +89,12 @@ export default function DeckDetail() {
     )
   }
 
-  const { deck, stats } = data
+  const { deck, stats } = consulta.data
+
+  const accion = async (fn: () => Promise<unknown>) => {
+    await ejecutar(fn)
+    consulta.recargar()
+  }
 
   return (
     <div className="space-y-10">
@@ -99,10 +114,9 @@ export default function DeckDetail() {
                 </Link>
                 <Button
                   variant="secondary"
-                  onClick={async () => {
-                    const tsv = await exportDeckTsv(deckId)
-                    downloadText(`${deck.name.replace(/[^\w\s-]/g, '').trim()}.tsv`, tsv)
-                  }}
+                  onClick={() =>
+                    void descargar(`/mazos/${deck.id}/exportar`, `${deck.name}.tsv`)
+                  }
                 >
                   Exportar TSV
                 </Button>
@@ -131,8 +145,9 @@ export default function DeckDetail() {
         {editingConfig ? (
           <ConfigForm
             config={deck.config}
+            enviando={enviando}
             onSave={async (config) => {
-              await db.decks.update(deckId, { config })
+              await accion(() => api.patch(`/mazos/${deckId}`, { config }))
               setEditingConfig(false)
             }}
           />
@@ -164,7 +179,7 @@ export default function DeckDetail() {
 
         {filtered.length === 0 ? (
           <p className="py-12 text-center text-sm text-ink-2">
-            {data.notes.length === 0
+            {consulta.data.notes.length === 0
               ? 'Este mazo esta vacio. Importa un archivo para llenarlo.'
               : 'Ninguna tarjeta coincide con esa busqueda.'}
           </p>
@@ -201,7 +216,11 @@ export default function DeckDetail() {
                     <Button
                       variant="ghost"
                       className="px-2 py-1 text-xs"
-                      onClick={() => void resetCards(cards.map((c) => c.id!))}
+                      onClick={() =>
+                        void accion(() =>
+                          api.post('/mazos/tarjetas/reiniciar', { ids: cards.map((c) => c.id) }),
+                        )
+                      }
                     >
                       Reiniciar
                     </Button>
@@ -209,9 +228,11 @@ export default function DeckDetail() {
                       variant="ghost"
                       className="px-2 py-1 text-xs"
                       onClick={() =>
-                        void setSuspended(
-                          cards.map((c) => c.id!),
-                          cards.every((c) => c.suspended === 0),
+                        void accion(() =>
+                          api.post('/mazos/tarjetas/suspender', {
+                            ids: cards.map((c) => c.id),
+                            suspended: cards.every((c) => c.suspended === 0),
+                          }),
                         )
                       }
                     >
@@ -220,7 +241,7 @@ export default function DeckDetail() {
                     <Button
                       variant="ghost"
                       className="px-2 py-1 text-xs text-danger"
-                      onClick={() => void deleteNote(note.id!)}
+                      onClick={() => void accion(() => api.delete(`/mazos/notas/${note.id}`))}
                     >
                       Borrar
                     </Button>
@@ -248,8 +269,9 @@ export default function DeckDetail() {
             <>
               <Button
                 variant="danger"
+                disabled={enviando}
                 onClick={async () => {
-                  await deleteDeck(deckId)
+                  await ejecutar(() => api.delete(`/mazos/${deckId}`))
                   navigate('/')
                 }}
               >
@@ -272,9 +294,11 @@ export default function DeckDetail() {
 
 function ConfigForm({
   config,
+  enviando,
   onSave,
 }: {
   config: DeckConfig
+  enviando: boolean
   onSave: (config: DeckConfig) => void | Promise<void>
 }) {
   const [draft, setDraft] = useState<DeckConfig>({ ...DEFAULT_DECK_CONFIG, ...config })
@@ -347,7 +371,7 @@ function ConfigForm({
       />
 
       <div className="flex justify-end">
-        <Button type="submit" variant="primary">
+        <Button type="submit" variant="primary" disabled={enviando}>
           Guardar cambios
         </Button>
       </div>
