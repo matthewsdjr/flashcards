@@ -1,22 +1,233 @@
 @import "tailwindcss";
 
+/*
+ * Sistema de tokens. Todos los colores se resuelven contra variables CSS que
+ * cambian con el tema, asi que los componentes nunca necesitan variantes dark:.
+ */
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
+  --font-sans: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-desk: var(--t-desk);
+  --color-paper: var(--t-paper);
+  --color-panel: var(--t-panel);
+
+  --color-ink: var(--t-ink);
+  --color-ink-2: var(--t-ink-2);
+  --color-ink-3: var(--t-ink-3);
+
+  --color-claret: var(--t-claret);
+  --color-claret-hi: var(--t-claret-hi);
+  --color-claret-soft: var(--t-claret-soft);
+  --color-on-claret: var(--t-on-claret);
+
+  --color-rule: var(--t-rule);
+  --color-rule-soft: var(--t-rule-soft);
+
+  /* Rampa de memoria: de lo desconocido a lo consolidado. */
+  --color-m-new: var(--t-m-new);
+  --color-m-learning: var(--t-m-learning);
+  --color-m-young: var(--t-m-young);
+  --color-m-mature: var(--t-m-mature);
+
+  /* Calificaciones. Se usan como filete y texto, nunca como relleno pleno. */
+  --color-again: var(--t-again);
+  --color-hard: var(--t-hard);
+  --color-good: var(--t-good);
+  --color-easy: var(--t-easy);
+
+  --color-danger: var(--t-danger);
+  --color-danger-soft: var(--t-danger-soft);
+
+  --shadow-card: var(--t-shadow-card);
+  --shadow-raised: var(--t-shadow-raised);
+}
+
+:root {
+  --t-desk: #e9eaec;
+  --t-paper: #ffffff;
+  --t-panel: #f2f3f5;
+
+  --t-ink: #191c22;
+  --t-ink-2: #666d7a;
+  --t-ink-3: #949aa6;
+
+  --t-claret: #9c2740;
+  --t-claret-hi: #862036;
+  --t-claret-soft: #f7e8eb;
+  --t-on-claret: #ffffff;
+
+  --t-rule: #d3d6db;
+  --t-rule-soft: #e3e5e9;
+
+  --t-m-new: #8a93a5;
+  --t-m-learning: #c08a2e;
+  --t-m-young: #5e9b78;
+  --t-m-mature: #2f6b4f;
+
+  --t-again: #a8324a;
+  --t-hard: #a06d16;
+  --t-good: #2f6b4f;
+  --t-easy: #2a6480;
+
+  --t-danger: #a8324a;
+  --t-danger-soft: #f7e8eb;
+
+  /* Luz desde arriba a la izquierda: la ficha se apoya sobre el escritorio. */
+  --t-shadow-card: 0 1px 1px rgb(25 28 34 / 0.04), 0 6px 14px -4px rgb(25 28 34 / 0.1),
+    0 18px 32px -12px rgb(25 28 34 / 0.12);
+  --t-shadow-raised: 0 1px 2px rgb(25 28 34 / 0.06), 0 2px 6px -2px rgb(25 28 34 / 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --t-desk: #0e1014;
+    --t-paper: #1a1d24;
+    --t-panel: #23272f;
+
+    --t-ink: #edeef0;
+    --t-ink-2: #959caa;
+    --t-ink-3: #6c7381;
+
+    --t-claret: #e4677f;
+    --t-claret-hi: #f08398;
+    --t-claret-soft: #2c1a20;
+    --t-on-claret: #1a1d24;
+
+    --t-rule: #2a2f39;
+    --t-rule-soft: #22262e;
+
+    --t-m-new: #79839a;
+    --t-m-learning: #d6a44b;
+    --t-m-young: #6fb08a;
+    --t-m-mature: #4b9370;
+
+    --t-again: #e0798e;
+    --t-hard: #d3a04a;
+    --t-good: #6fb08a;
+    --t-easy: #7bb2cc;
+
+    --t-danger: #e0798e;
+    --t-danger-soft: #2c1a20;
+
+    --t-shadow-card: 0 1px 1px rgb(0 0 0 / 0.3), 0 8px 18px -6px rgb(0 0 0 / 0.5),
+      0 24px 40px -16px rgb(0 0 0 / 0.55);
+    --t-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 8px -3px rgb(0 0 0 / 0.4);
+  }
+}
+
+:root[data-theme="dark"] {
+  --t-desk: #0e1014;
+  --t-paper: #1a1d24;
+  --t-panel: #23272f;
+
+  --t-ink: #edeef0;
+  --t-ink-2: #959caa;
+  --t-ink-3: #6c7381;
+
+  --t-claret: #e4677f;
+  --t-claret-hi: #f08398;
+  --t-claret-soft: #2c1a20;
+  --t-on-claret: #1a1d24;
+
+  --t-rule: #2a2f39;
+  --t-rule-soft: #22262e;
+
+  --t-m-new: #79839a;
+  --t-m-learning: #d6a44b;
+  --t-m-young: #6fb08a;
+  --t-m-mature: #4b9370;
+
+  --t-again: #e0798e;
+  --t-hard: #d3a04a;
+  --t-good: #6fb08a;
+  --t-easy: #7bb2cc;
+
+  --t-danger: #e0798e;
+  --t-danger-soft: #2c1a20;
+
+  --t-shadow-card: 0 1px 1px rgb(0 0 0 / 0.3), 0 8px 18px -6px rgb(0 0 0 / 0.5),
+    0 24px 40px -16px rgb(0 0 0 / 0.55);
+  --t-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 8px -3px rgb(0 0 0 / 0.4);
 }
 
 @layer base {
   html {
     color-scheme: light dark;
+    -webkit-text-size-adjust: 100%;
   }
+
   body {
-    @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    background-color: var(--t-desk);
+    color: var(--t-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
+
   ::selection {
-    @apply bg-indigo-500/30;
+    background-color: var(--t-claret);
+    color: var(--t-on-claret);
+  }
+
+  /* Foco visible y consistente en toda la app. */
+  :focus-visible {
+    outline: 2px solid var(--t-claret);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* Los numeros de conteos e intervalos siempre alineados. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-/* Contenido renderizado de las tarjetas */
-.card-content {
-  @apply text-balance leading-relaxed;
+/* El texto de la ficha: la voz de la app. */
+.card-face {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  font-variation-settings: "SOFT" 20, "WONK" 0;
+  text-wrap: balance;
+  letter-spacing: -0.01em;
+}
+
+.display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.015em;
+}
+
+/* Revelar la respuesta es un cambio de estado real: se anuncia con movimiento. */
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-reveal {
+  animation: reveal 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -13,7 +13,15 @@ import {
   type ParsedFile,
 } from '../lib/parse'
 import { importRows, rowToNote, type ImportResult } from '../lib/import'
-import { Badge, Button, Card, Field } from '../components/ui'
+import {
+  Button,
+  Checkbox,
+  Field,
+  Panel,
+  SectionHeading,
+  Stat,
+  Tag,
+} from '../components/ui'
 import { cx, inputClass } from '../lib/classnames'
 
 const NEW_DECK = '__new__'
@@ -28,6 +36,7 @@ export default function Import() {
   const [filename, setFilename] = useState('')
   const [parsed, setParsed] = useState<ParsedFile | null>(null)
   const [mapping, setMapping] = useState<FieldRole[]>([])
+  const [dragging, setDragging] = useState(false)
   const [deckChoice, setDeckChoice] = useState(searchParams.get('deck') ?? NEW_DECK)
   const [newDeckName, setNewDeckName] = useState('')
   const [onDuplicate, setOnDuplicate] = useState<'skip' | 'update' | 'add'>('skip')
@@ -44,7 +53,7 @@ export default function Import() {
       const text = await file.text()
       const data = parseDelimited(text)
       if (data.rows.length === 0) {
-        setError('No se encontraron filas con datos en el archivo.')
+        setError('Ese archivo no tiene filas con datos. Revisa que no este vacio.')
         setParsed(null)
         return
       }
@@ -53,7 +62,7 @@ export default function Import() {
       setMapping(guessMapping(data.headers, data.hasHeader))
       if (!newDeckName) setNewDeckName(file.name.replace(/\.(tsv|csv|txt)$/i, ''))
     } catch {
-      setError('No se pudo leer el archivo. Verifica que sea un archivo de texto.')
+      setError('No se pudo leer el archivo. Tiene que ser un archivo de texto.')
     }
   }
 
@@ -61,7 +70,7 @@ export default function Import() {
 
   const previewNotes = useMemo(() => {
     if (!parsed) return []
-    return parsed.rows.slice(0, 5).map((row) => rowToNote(row, mapping, extraTags))
+    return parsed.rows.slice(0, 4).map((row) => rowToNote(row, mapping, extraTags))
   }, [parsed, mapping, extraTags])
 
   const validCount = useMemo(() => {
@@ -84,21 +93,15 @@ export default function Import() {
     try {
       let deckId: number
       if (deckChoice === NEW_DECK) {
-        deckId = await createDeck(newDeckName, `Importado desde ${filename}`, { generateReverse })
+        deckId = await createDeck(newDeckName, `Importado de ${filename}`, { generateReverse })
       } else {
         deckId = Number(deckChoice)
         await db.decks.update(deckId, { 'config.generateReverse': generateReverse })
       }
-      const res = await importRows({
-        deckId,
-        rows: parsed.rows,
-        mapping,
-        onDuplicate,
-        extraTags,
-      })
+      const res = await importRows({ deckId, rows: parsed.rows, mapping, onDuplicate, extraTags })
       setResult({ ...res, deckId })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fallo la importacion')
+      setError(err instanceof Error ? err.message : 'La importacion no se completo')
     } finally {
       setBusy(false)
     }
@@ -114,16 +117,23 @@ export default function Import() {
 
   if (result) {
     return (
-      <Card className="mx-auto max-w-lg p-8 text-center">
-        <h1 className="text-xl font-semibold">Importacion completada</h1>
-        <dl className="mt-6 grid grid-cols-2 gap-3 text-left text-sm">
-          <Stat label="Notas agregadas" value={result.added} />
-          <Stat label="Tarjetas creadas" value={result.cardsCreated} />
-          <Stat label="Actualizadas" value={result.updated} />
-          <Stat label="Duplicadas omitidas" value={result.skipped} />
-          <Stat label="Filas invalidas" value={result.invalid} />
-        </dl>
-        <div className="mt-7 flex justify-center gap-2">
+      <div className="mx-auto max-w-md space-y-7 text-center">
+        <div>
+          <h1 className="display text-3xl font-medium">Listo para estudiar</h1>
+          <p className="mt-2 text-sm text-ink-2">
+            {result.added > 0
+              ? `Se agregaron ${result.added} notas al mazo.`
+              : 'No habia nada nuevo que agregar.'}
+          </p>
+        </div>
+
+        <Panel className="grid grid-cols-3 gap-4 px-6 py-5 text-left">
+          <Stat value={result.cardsCreated} label="tarjetas creadas" tone="claret" />
+          <Stat value={result.skipped} label="duplicadas" />
+          <Stat value={result.invalid} label="descartadas" />
+        </Panel>
+
+        <div className="flex justify-center gap-2">
           <Button variant="secondary" onClick={reset}>
             Importar otro
           </Button>
@@ -131,98 +141,92 @@ export default function Import() {
             Empezar a estudiar
           </Button>
         </div>
-      </Card>
+      </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Importar tarjetas</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Acepta TSV (el formato que exporta Anki), CSV y archivos separados por punto y coma o
-          barra vertical. El separador se detecta solo.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <SectionHeading
+        as="h1"
+        title="Importar tarjetas"
+        description="Acepta TSV, CSV y archivos separados por punto y coma o barra vertical. El separador se detecta solo, y el preambulo que agrega Anki se ignora."
+      />
 
-      <Card className="p-5">
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault()
-            const file = e.dataTransfer.files[0]
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragging(false)
+          const file = e.dataTransfer.files[0]
+          if (file) void handleFile(file)
+        }}
+        className={cx(
+          'rounded-lg border border-dashed px-6 py-12 text-center transition',
+          dragging ? 'border-claret bg-claret-soft' : 'border-rule bg-paper',
+        )}
+      >
+        <p className="text-sm text-ink-2">Arrastra tu archivo hasta aca</p>
+        <div className="mt-4">
+          <Button variant="secondary" onClick={() => fileInput.current?.click()}>
+            Elegir archivo
+          </Button>
+        </div>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".tsv,.csv,.txt,text/plain,text/csv,text/tab-separated-values"
+          className="sr-only"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
             if (file) void handleFile(file)
           }}
-          className="rounded-lg border-2 border-dashed border-slate-300 px-6 py-10 text-center dark:border-slate-700"
-        >
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            Arrastra el archivo aca o
+        />
+        {filename && parsed && (
+          <p className="tnum mt-4 text-xs text-ink-2">
+            {filename} · {parsed.rows.length} filas · {delimiterName(parsed.delimiter)}
+            {parsed.hasHeader && ' · con encabezado'}
           </p>
-          <div className="mt-3">
-            <Button variant="secondary" onClick={() => fileInput.current?.click()}>
-              Elegir archivo
-            </Button>
-          </div>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".tsv,.csv,.txt,text/plain,text/csv,text/tab-separated-values"
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) void handleFile(file)
-            }}
-          />
-          {filename && (
-            <p className="mt-3 text-xs text-slate-500">
-              {filename}
-              {parsed && (
-                <>
-                  {' '}
-                  - {parsed.rows.length} filas - {delimiterName(parsed.delimiter)}
-                  {parsed.hasHeader && ' - con encabezado'}
-                </>
-              )}
-            </p>
-          )}
-        </div>
-        {error && <p className="mt-3 text-sm text-rose-600">{error}</p>}
-        {parsed?.errors.map((e) => (
-          <p key={e} className="mt-2 text-xs text-amber-600">
-            {e}
-          </p>
-        ))}
-      </Card>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {parsed?.errors.map((e) => (
+        <p key={e} className="text-xs text-hard">
+          {e}
+        </p>
+      ))}
 
       {parsed && (
         <>
-          <Card className="p-5">
-            <h2 className="text-base font-semibold">Mapeo de columnas</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Indica que representa cada columna. Frente y reverso son obligatorios; si asignas el
-              mismo rol a dos columnas, su contenido se une.
-            </p>
-            <div className="mt-4 overflow-x-auto">
+          <div>
+            <SectionHeading
+              title="Que es cada columna"
+              description="Frente y reverso son obligatorios. Si dos columnas comparten rol, su contenido se une."
+            />
+            <div className="mt-5 overflow-x-auto">
               <table className="w-full min-w-125 text-left text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
+                  <tr className="border-b border-rule text-xs text-ink-2">
                     <th className="py-2 pr-4 font-medium">Columna</th>
-                    <th className="py-2 pr-4 font-medium">Ejemplo</th>
+                    <th className="py-2 pr-4 font-medium">Primer valor</th>
                     <th className="py-2 font-medium">Rol</th>
                   </tr>
                 </thead>
                 <tbody>
                   {parsed.headers.map((header, index) => (
-                    <tr
-                      key={index}
-                      className="border-b border-slate-100 last:border-0 dark:border-slate-800/60"
-                    >
-                      <td className="py-2 pr-4 font-medium">{header}</td>
-                      <td className="max-w-70 truncate py-2 pr-4 text-slate-500">
-                        {parsed.rows[0]?.[index] || <span className="italic">vacio</span>}
+                    <tr key={index} className="border-b border-rule-soft">
+                      <td className="py-2.5 pr-4 font-medium text-ink">{header}</td>
+                      <td className="max-w-70 truncate py-2.5 pr-4 text-ink-2">
+                        {parsed.rows[0]?.[index] || <span className="text-ink-3">vacio</span>}
                       </td>
-                      <td className="py-2">
+                      <td className="py-2.5">
                         <select
+                          aria-label={`Rol de la columna ${header}`}
                           className={cx(inputClass, 'max-w-56')}
                           value={mapping[index] ?? 'ignore'}
                           onChange={(e) => {
@@ -244,15 +248,16 @@ export default function Import() {
               </table>
             </div>
             {(!hasFront || !hasBack) && (
-              <p className="mt-3 text-sm text-rose-600">
-                Asigna al menos una columna al frente y otra al reverso.
+              <p className="mt-3 text-sm text-danger">
+                Falta asignar {!hasFront ? 'el frente' : 'el reverso'}. Sin las dos caras no hay
+                tarjeta que estudiar.
               </p>
             )}
-          </Card>
+          </div>
 
-          <Card className="p-5">
-            <h2 className="text-base font-semibold">Destino y opciones</h2>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <Panel className="space-y-5 p-5">
+            <h2 className="display text-lg font-medium">Donde van y con que etiquetas</h2>
+            <div className="grid gap-5 sm:grid-cols-2">
               <Field label="Mazo de destino">
                 <select
                   className={inputClass}
@@ -269,7 +274,7 @@ export default function Import() {
               </Field>
 
               {deckChoice === NEW_DECK && (
-                <Field label="Nombre del mazo nuevo">
+                <Field label="Nombre del mazo">
                   <input
                     className={inputClass}
                     value={newDeckName}
@@ -284,13 +289,13 @@ export default function Import() {
                   value={onDuplicate}
                   onChange={(e) => setOnDuplicate(e.target.value as typeof onDuplicate)}
                 >
-                  <option value="skip">Omitir la fila</option>
+                  <option value="skip">Saltear la fila</option>
                   <option value="update">Actualizar pista, notas y etiquetas</option>
-                  <option value="add">Importar igual (permite duplicados)</option>
+                  <option value="add">Agregarla igual</option>
                 </select>
               </Field>
 
-              <Field label="Etiquetas para todas las notas" hint="Separadas por espacio o coma.">
+              <Field label="Etiquetas para todo el lote" hint="Separadas por espacio o coma.">
                 <input
                   className={inputClass}
                   value={tagsInput}
@@ -300,73 +305,60 @@ export default function Import() {
               </Field>
             </div>
 
-            <label className="mt-4 flex items-start gap-2.5 text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5 size-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                checked={generateReverse}
-                onChange={(e) => setGenerateReverse(e.target.checked)}
-              />
-              <span>
-                Generar tambien la tarjeta inversa
-                <span className="block text-xs text-slate-500">
-                  Crea una segunda tarjeta que muestra el reverso como pregunta. Duplica la
-                  cantidad de tarjetas a estudiar.
-                </span>
-              </span>
-            </label>
-          </Card>
+            <Checkbox
+              checked={generateReverse}
+              onChange={setGenerateReverse}
+              label="Generar tambien la tarjeta inversa"
+              hint="Agrega una segunda tarjeta que pregunta al reves. Duplica lo que vas a estudiar."
+            />
+          </Panel>
 
-          <Card className="p-5">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold">Vista previa</h2>
-              <Badge tone={validCount > 0 ? 'emerald' : 'rose'}>
-                {validCount} de {parsed.rows.length} filas validas
-              </Badge>
-            </div>
-            <ul className="mt-4 space-y-2">
-              {previewNotes.map((note, i) => (
-                <li
-                  key={i}
-                  className="rounded-lg bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800/50"
+          <div>
+            <SectionHeading
+              title="Asi van a quedar"
+              actions={
+                <span
+                  className={cx(
+                    'tnum text-sm font-medium',
+                    validCount > 0 ? 'text-ink' : 'text-danger',
+                  )}
                 >
-                  <p className="font-medium">{note.front || <em className="text-rose-600">sin frente</em>}</p>
-                  <p className="mt-0.5 text-slate-600 dark:text-slate-400">
-                    {note.back || <em className="text-rose-600">sin reverso</em>}
+                  {validCount} de {parsed.rows.length} filas utiles
+                </span>
+              }
+            />
+            <ul className="mt-5 space-y-2">
+              {previewNotes.map((note, i) => (
+                <li key={i} className="rounded-lg border border-rule bg-paper px-4 py-3">
+                  <p className="card-face text-base text-ink">
+                    {note.front || <span className="text-danger">falta el frente</span>}
                   </p>
-                  {note.hint && <p className="mt-1 text-xs text-slate-500">Pista: {note.hint}</p>}
-                  {note.extra && <p className="mt-1 text-xs text-slate-500">{note.extra}</p>}
+                  <p className="mt-1 text-sm text-ink-2">
+                    {note.back || <span className="text-danger">falta el reverso</span>}
+                  </p>
+                  {note.hint && <p className="mt-1.5 text-xs text-ink-3">Pista: {note.hint}</p>}
                   {note.tags.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
                       {note.tags.map((tag) => (
-                        <Badge key={tag}>{tag}</Badge>
+                        <Tag key={tag}>{tag}</Tag>
                       ))}
                     </div>
                   )}
                 </li>
               ))}
             </ul>
-          </Card>
+          </div>
 
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex items-center justify-end gap-2 border-t border-rule pt-6">
             <Link to="/">
               <Button variant="ghost">Cancelar</Button>
             </Link>
             <Button variant="primary" disabled={!canImport} onClick={() => void handleImport()}>
-              {busy ? 'Importando...' : `Importar ${validCount} tarjetas`}
+              {busy ? 'Importando' : `Importar ${validCount} tarjetas`}
             </Button>
           </div>
         </>
       )}
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
-      <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className="text-lg font-semibold tabular-nums">{value}</dd>
     </div>
   )
 }

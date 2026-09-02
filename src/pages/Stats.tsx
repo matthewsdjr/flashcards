@@ -1,6 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CardState, db, localDay } from '../db/schema'
-import { Card, EmptyState } from '../components/ui'
+import { MATURE_DAYS } from '../db/queries'
+import { EmptyState, Panel, SectionHeading, Spinner, Stat } from '../components/ui'
+import { StrengthLegend, StrengthStrip } from '../components/StrengthStrip'
 import { formatDuration } from '../lib/format'
 
 const DAYS_BACK = 30
@@ -12,24 +14,17 @@ interface DayBucket {
   count: number
 }
 
-function lastDays(n: number): DayBucket[] {
+function buildDays(count: number, offset: number): DayBucket[] {
   const out: DayBucket[] = []
   const today = new Date()
-  for (let i = n - 1; i >= 0; i--) {
+  for (let i = 0; i < count; i++) {
     const d = new Date(today)
-    d.setDate(today.getDate() - i)
-    out.push({ day: localDay(d), label: `${d.getDate()}/${d.getMonth() + 1}`, count: 0 })
-  }
-  return out
-}
-
-function nextDays(n: number): DayBucket[] {
-  const out: DayBucket[] = []
-  const today = new Date()
-  for (let i = 0; i < n; i++) {
-    const d = new Date(today)
-    d.setDate(today.getDate() + i)
-    out.push({ day: localDay(d), label: i === 0 ? 'Hoy' : `${d.getDate()}/${d.getMonth() + 1}`, count: 0 })
+    d.setDate(today.getDate() + offset + i)
+    out.push({
+      day: localDay(d),
+      label: `${d.getDate()}/${d.getMonth() + 1}`,
+      count: 0,
+    })
   }
   return out
 }
@@ -43,7 +38,7 @@ export default function Stats() {
       db.decks.count(),
     ])
 
-    const history = lastDays(DAYS_BACK)
+    const history = buildDays(DAYS_BACK, -(DAYS_BACK - 1))
     const historyIndex = new Map(history.map((b, i) => [b.day, i]))
     let totalTime = 0
     let again = 0
@@ -54,7 +49,8 @@ export default function Stats() {
       if (log.rating === 1) again++
     }
 
-    const forecast = nextDays(FORECAST_DAYS)
+    const forecast = buildDays(FORECAST_DAYS, 0)
+    forecast[0].label = 'Hoy'
     const forecastIndex = new Map(forecast.map((b, i) => [b.day, i]))
     const active = cards.filter((c) => c.suspended === 0)
     for (const card of active) {
@@ -64,91 +60,119 @@ export default function Stats() {
       else if (card.due < Date.now()) forecast[0].count++
     }
 
-    const mature = active.filter(
-      (c) => c.state === CardState.Review && c.scheduledDays >= 21,
-    ).length
+    const review = active.filter((c) => c.state === CardState.Review)
+    const strength = {
+      new: active.filter((c) => c.state === CardState.New).length,
+      learning: active.filter(
+        (c) => c.state === CardState.Learning || c.state === CardState.Relearning,
+      ).length,
+      young: review.filter((c) => c.scheduledDays < MATURE_DAYS).length,
+      mature: review.filter((c) => c.scheduledDays >= MATURE_DAYS).length,
+    }
+
+    // Dias consecutivos con al menos un repaso, contando hacia atras desde hoy.
+    let streak = 0
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].count > 0) streak++
+      else if (i < history.length - 1) break
+    }
 
     return {
       history,
       forecast,
+      strength,
       deckCount,
       totalCards: cards.length,
       reviews: logs.length,
       accuracy: logs.length > 0 ? 1 - again / logs.length : null,
       totalTime,
-      mature,
-      newCount: active.filter((c) => c.state === CardState.New).length,
+      streak,
     }
   }, [])
 
-  if (!data) return <p className="text-sm text-slate-500">Cargando...</p>
+  if (!data) return <Spinner />
 
   if (data.deckCount === 0) {
     return (
       <EmptyState
-        title="Sin datos todavia"
-        description="Las estadisticas aparecen cuando importas un mazo y empezas a repasar."
+        title="Todavia no hay nada que medir"
+        description="En cuanto importes un mazo y hagas la primera sesion, aca vas a ver como avanza."
       />
     )
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Estadisticas</h1>
+    <div className="space-y-10">
+      <SectionHeading
+        as="h1"
+        title="Tu progreso"
+        description={`Ultimos ${DAYS_BACK} dias en todos los mazos.`}
+      />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric label="Repasos (30 dias)" value={String(data.reviews)} />
-        <Metric
-          label="Aciertos"
-          value={data.accuracy === null ? '-' : `${Math.round(data.accuracy * 100)}%`}
+      <Panel className="grid grid-cols-2 gap-6 px-6 py-5 sm:grid-cols-4">
+        <Stat value={data.reviews} label="repasos hechos" tone="claret" />
+        <Stat
+          value={data.accuracy === null ? 'sin datos' : `${Math.round(data.accuracy * 100)}%`}
+          label="de aciertos"
         />
-        <Metric label="Tiempo de estudio" value={formatDuration(data.totalTime)} />
-        <Metric label="Tarjetas maduras" value={`${data.mature} / ${data.totalCards}`} />
+        <Stat value={formatDuration(data.totalTime)} label="estudiando" />
+        <Stat value={data.streak} label={data.streak === 1 ? 'dia seguido' : 'dias seguidos'} />
+      </Panel>
+
+      <div>
+        <SectionHeading
+          title="Que tan consolidado esta lo que sabes"
+          description="Cada tarjeta avanza de sin ver a consolidada a medida que la vas acertando con intervalos mas largos."
+        />
+        <div className="mt-5 space-y-3">
+          <StrengthStrip strength={data.strength} height="h-3" />
+          <StrengthLegend strength={data.strength} />
+        </div>
       </div>
 
-      <Card className="p-5">
-        <h2 className="text-base font-semibold">Repasos por dia</h2>
-        <p className="mt-1 text-sm text-slate-500">Ultimos {DAYS_BACK} dias.</p>
-        <BarChart buckets={data.history} color="bg-indigo-500" />
-      </Card>
+      <div>
+        <SectionHeading title="Repasos por dia" />
+        <BarChart buckets={data.history} tone="bg-claret" />
+      </div>
 
-      <Card className="p-5">
-        <h2 className="text-base font-semibold">Carga proxima</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Tarjetas programadas para los proximos {FORECAST_DAYS} dias. No incluye las nuevas
-          ({data.newCount} sin introducir).
-        </p>
-        <BarChart buckets={data.forecast} color="bg-emerald-500" />
-      </Card>
+      <div>
+        <SectionHeading
+          title="Lo que viene"
+          description={`Tarjetas ya programadas para los proximos ${FORECAST_DAYS} dias. No incluye las que todavia no viste.`}
+        />
+        <BarChart buckets={data.forecast} tone="bg-m-young" />
+      </div>
     </div>
   )
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
-    </Card>
-  )
-}
-
-function BarChart({ buckets, color }: { buckets: DayBucket[]; color: string }) {
+function BarChart({ buckets, tone }: { buckets: DayBucket[]; tone: string }) {
   const max = Math.max(1, ...buckets.map((b) => b.count))
+  const step = Math.ceil(buckets.length / 8)
+
   return (
-    <div className="mt-5 flex h-40 items-end gap-1">
-      {buckets.map((bucket) => (
-        <div key={bucket.day} className="group flex min-w-0 flex-1 flex-col items-center gap-1">
-          <div className="flex w-full flex-1 items-end">
+    <div className="mt-5">
+      <div className="flex h-36 items-end gap-1 border-b border-rule">
+        {buckets.map((bucket) => (
+          <div key={bucket.day} className="flex h-full min-w-0 flex-1 items-end">
             <div
-              className={`w-full rounded-t ${color} transition group-hover:opacity-80`}
-              style={{ height: `${(bucket.count / max) * 100}%`, minHeight: bucket.count ? 2 : 0 }}
+              className={`w-full rounded-t-sm ${tone} ${bucket.count === 0 ? 'opacity-0' : ''}`}
+              style={{ height: `${Math.max((bucket.count / max) * 100, 2)}%` }}
               title={`${bucket.label}: ${bucket.count}`}
             />
           </div>
-          <span className="truncate text-[10px] tabular-nums text-slate-400">{bucket.label}</span>
-        </div>
-      ))}
+        ))}
+      </div>
+      <div className="mt-1.5 flex gap-1">
+        {buckets.map((bucket, i) => (
+          <span
+            key={bucket.day}
+            className="tnum min-w-0 flex-1 truncate text-center text-[10px] text-ink-3"
+          >
+            {i % step === 0 || i === buckets.length - 1 ? bucket.label : ''}
+          </span>
+        ))}
+      </div>
     </div>
   )
 }

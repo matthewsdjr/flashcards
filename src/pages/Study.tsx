@@ -4,13 +4,14 @@ import { db, type Card as CardRow, type Deck, type Note } from '../db/schema'
 import { answerCard, buildQueue } from '../db/queries'
 import {
   GRADES,
-  GRADE_CLASSES,
   GRADE_KEYS,
   GRADE_LABELS,
+  GRADE_RULE,
+  GRADE_TEXT,
   preview,
   type Grade,
 } from '../lib/scheduler'
-import { Badge, Button, Card, EmptyState } from '../components/ui'
+import { Button, EmptyState, Panel, Spinner, Stat, Tag } from '../components/ui'
 import { cx } from '../lib/classnames'
 import { formatDuration, formatInterval } from '../lib/format'
 
@@ -140,16 +141,16 @@ export default function Study() {
     return () => window.removeEventListener('keydown', onKey)
   }, [revealed, handleAnswer])
 
-  if (loading) return <p className="text-sm text-slate-500">Cargando sesion...</p>
+  if (loading) return <Spinner label="Preparando la sesion" />
 
   if (!deck) {
     return (
       <EmptyState
-        title="Mazo no encontrado"
-        description="El mazo que intentas estudiar ya no existe."
+        title="Ese mazo ya no existe"
+        description="Puede que lo hayas borrado desde otra pestaña."
         action={
           <Link to="/">
-            <Button variant="primary">Volver a mis mazos</Button>
+            <Button variant="primary">Ver mis mazos</Button>
           </Link>
         }
       />
@@ -157,26 +158,36 @@ export default function Study() {
   }
 
   if (!current) {
+    const done = stats.reviewed > 0
     return (
-      <div className="space-y-6">
-        <EmptyState
-          title={stats.reviewed > 0 ? 'Sesion terminada' : 'Nada pendiente por ahora'}
-          description={
-            stats.reviewed > 0
-              ? `Repasaste ${stats.reviewed} tarjetas en ${formatDuration(stats.timeMs)}. Fallaste ${stats.again}.`
-              : 'Ya alcanzaste el limite diario de este mazo o todas las tarjetas estan programadas para mas adelante.'
-          }
-          action={
-            <div className="flex gap-2">
-              <Link to="/">
-                <Button variant="secondary">Mis mazos</Button>
-              </Link>
-              <Link to={`/mazo/${deck.id}`}>
-                <Button variant="primary">Ver el mazo</Button>
-              </Link>
-            </div>
-          }
-        />
+      <div className="mx-auto max-w-lg space-y-6 text-center">
+        <div>
+          <h1 className="display text-3xl font-medium text-ink">
+            {done ? 'Terminaste por hoy' : 'No queda nada pendiente'}
+          </h1>
+          <p className="mt-2 text-sm text-ink-2">
+            {done
+              ? 'Las tarjetas vuelven solas cuando toque repasarlas.'
+              : 'Ya alcanzaste el limite diario del mazo, o todo esta programado para mas adelante.'}
+          </p>
+        </div>
+
+        {done && (
+          <Panel className="flex justify-around px-6 py-5 text-left">
+            <Stat value={stats.reviewed} label="repasadas" tone="claret" />
+            <Stat value={stats.again} label="falladas" />
+            <Stat value={formatDuration(stats.timeMs)} label="de estudio" />
+          </Panel>
+        )}
+
+        <div className="flex justify-center gap-2">
+          <Link to="/">
+            <Button variant="secondary">Mis mazos</Button>
+          </Link>
+          <Link to={`/mazo/${deck.id}`}>
+            <Button variant="primary">Ver {deck.name}</Button>
+          </Link>
+        </div>
       </div>
     )
   }
@@ -184,88 +195,125 @@ export default function Study() {
   const { card, note } = current
   const question = card.reverse ? note.back : note.front
   const answer = card.reverse ? note.front : note.back
+  const seen = stats.reviewed
+  const remaining = queue.length
+  const progress = seen + remaining > 0 ? (seen / (seen + remaining)) * 100 : 0
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Link to="/" className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-            Mazos
-          </Link>
-          <span className="text-slate-400">/</span>
-          <span className="text-sm font-medium">{deck.name}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge tone="slate">{queue.length} en cola</Badge>
-          <Badge tone="emerald">{stats.reviewed} hechas</Badge>
-          {card.reverse === 1 && <Badge tone="blue">Inversa</Badge>}
-        </div>
+    <div className="mx-auto flex min-h-[calc(100dvh-11rem)] max-w-2xl flex-col justify-center">
+      <div className="flex items-baseline justify-between gap-4">
+        <Link
+          to={`/mazo/${deck.id}`}
+          className="truncate text-sm font-medium text-ink-2 transition hover:text-ink"
+        >
+          {deck.name}
+        </Link>
+        <p className="tnum shrink-0 text-sm text-ink-2">
+          <span className="font-medium text-ink">{seen}</span> de {seen + remaining}
+        </p>
       </div>
 
-      <Card className="overflow-hidden">
-        <div className="flex min-h-56 flex-col items-center justify-center gap-4 px-6 py-12 text-center">
-          <p className="card-content text-2xl font-medium whitespace-pre-wrap">{question}</p>
-          {note.hint && !revealed && (
-            showHint ? (
-              <p className="text-sm text-slate-500 whitespace-pre-wrap">{note.hint}</p>
+      {/* La barra de avance es informacion, no decoracion: reemplaza a las insignias. */}
+      <div className="mt-2 h-0.5 w-full overflow-hidden rounded-full bg-rule">
+        <div
+          className="h-full rounded-full bg-claret transition-[width] duration-300"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
+      <Panel
+        radius="hero"
+        className={cx(
+          'relative mt-6 overflow-hidden transition',
+          // Antes de responder, tocar la ficha la da vuelta: es como funciona en papel.
+          !revealed && 'cursor-pointer hover:-translate-y-0.5',
+        )}
+      >
+        {/* El lomo claret: el detalle memorable de la ficha. */}
+        <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-claret" />
+
+        <div
+          role={revealed ? undefined : 'button'}
+          tabIndex={revealed ? undefined : 0}
+          aria-label={revealed ? undefined : 'Mostrar la respuesta'}
+          onClick={() => !revealed && setRevealed(true)}
+          className="flex min-h-56 flex-col items-center justify-center gap-5 px-8 py-12 text-center focus-visible:outline-none sm:px-14">
+          <p className="card-face text-3xl leading-snug whitespace-pre-wrap text-ink sm:text-4xl">
+            {question}
+          </p>
+
+          {note.hint &&
+            !revealed &&
+            (showHint ? (
+              <p className="max-w-md text-sm whitespace-pre-wrap text-ink-2">{note.hint}</p>
             ) : (
               <button
-                onClick={() => setShowHint(true)}
-                className="text-xs font-medium text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+                onClick={(e) => {
+                  // No debe revelar la respuesta: la pista es un paso previo.
+                  e.stopPropagation()
+                  setShowHint(true)
+                }}
+                className="rounded text-sm font-medium text-claret transition hover:underline"
               >
-                Mostrar pista (H)
+                Ver la pista
               </button>
-            )
-          )}
+            ))}
         </div>
 
         {revealed && (
-          <div className="border-t border-slate-200 bg-slate-50 px-6 py-10 text-center dark:border-slate-800 dark:bg-slate-950/40">
-            <p className="card-content text-2xl font-medium whitespace-pre-wrap">{answer}</p>
+          <div className="animate-reveal border-t border-rule px-8 py-10 text-center sm:px-14">
+            <p className="card-face text-2xl leading-snug whitespace-pre-wrap text-ink sm:text-3xl">
+              {answer}
+            </p>
             {note.extra && (
-              <p className="mx-auto mt-4 max-w-prose text-sm text-slate-500 whitespace-pre-wrap">
+              <p className="mx-auto mt-5 max-w-md text-sm leading-relaxed whitespace-pre-wrap text-ink-2">
                 {note.extra}
               </p>
             )}
             {note.tags.length > 0 && (
-              <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+              <div className="mt-6 flex flex-wrap justify-center gap-1.5">
                 {note.tags.map((tag) => (
-                  <Badge key={tag}>{tag}</Badge>
+                  <Tag key={tag}>{tag}</Tag>
                 ))}
               </div>
             )}
           </div>
         )}
-      </Card>
+      </Panel>
 
-      {!revealed ? (
-        <Button variant="primary" className="w-full py-3" onClick={() => setRevealed(true)}>
-          Mostrar respuesta
-          <span className="text-xs opacity-70">(Espacio)</span>
-        </Button>
-      ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {options?.map(({ grade, interval }) => (
-            <button
-              key={grade}
-              onClick={() => void handleAnswer(grade)}
-              className={cx(
-                'flex flex-col items-center gap-0.5 rounded-lg px-3 py-3 text-white transition',
-                'focus-visible:outline-2 focus-visible:outline-offset-2',
-                GRADE_CLASSES[grade],
-              )}
-            >
-              <span className="text-sm font-semibold">{GRADE_LABELS[grade]}</span>
-              <span className="text-xs tabular-nums opacity-90">
-                {interval} - tecla {GRADE_KEYS[grade]}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="mt-6">
+        {!revealed ? (
+          <div className="flex justify-center">
+            <Button variant="primary" className="px-8" onClick={() => setRevealed(true)}>
+              Mostrar respuesta
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {options?.map(({ grade, interval }) => (
+              <button
+                key={grade}
+                onClick={() => void handleAnswer(grade)}
+                className={cx(
+                  'group rounded-md border border-b-2 border-rule bg-paper px-3 py-3',
+                  'shadow-raised transition hover:-translate-y-px hover:border-ink-3',
+                  GRADE_RULE[grade],
+                )}
+              >
+                <span className={cx('block text-sm font-semibold', GRADE_TEXT[grade])}>
+                  {GRADE_LABELS[grade]}
+                </span>
+                <span className="tnum mt-0.5 block text-xs text-ink-2">{interval}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
-      <p className="text-center text-xs text-slate-400">
-        Espacio muestra la respuesta y luego responde Bien. Las teclas 1 a 4 califican directo.
+      <p className="mt-5 text-center text-xs text-ink-3">
+        {revealed
+          ? 'Teclas 1 a 4 para calificar. Espacio responde Bien.'
+          : `Toca la ficha o pulsa Espacio${note.hint ? '. H muestra la pista' : ''}.`}
       </p>
     </div>
   )

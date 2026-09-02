@@ -31,11 +31,22 @@ export const GRADE_KEYS: Record<Grade, string> = {
   [Rating.Easy]: '4',
 }
 
-export const GRADE_CLASSES: Record<Grade, string> = {
-  [Rating.Again]: 'bg-rose-600 hover:bg-rose-500 focus-visible:outline-rose-400',
-  [Rating.Hard]: 'bg-amber-600 hover:bg-amber-500 focus-visible:outline-amber-400',
-  [Rating.Good]: 'bg-emerald-600 hover:bg-emerald-500 focus-visible:outline-emerald-400',
-  [Rating.Easy]: 'bg-sky-600 hover:bg-sky-500 focus-visible:outline-sky-400',
+/*
+ * Los botones de calificacion no se rellenan de color: llevan un filete
+ * inferior y el texto teñido. Asi se escanean igual sin competir con la ficha.
+ */
+export const GRADE_RULE: Record<Grade, string> = {
+  [Rating.Again]: 'border-b-again hover:bg-again/5',
+  [Rating.Hard]: 'border-b-hard hover:bg-hard/5',
+  [Rating.Good]: 'border-b-good hover:bg-good/5',
+  [Rating.Easy]: 'border-b-easy hover:bg-easy/5',
+}
+
+export const GRADE_TEXT: Record<Grade, string> = {
+  [Rating.Again]: 'text-again',
+  [Rating.Hard]: 'text-hard',
+  [Rating.Good]: 'text-good',
+  [Rating.Easy]: 'text-easy',
 }
 
 function toSteps(steps: string[]): StepUnit[] {

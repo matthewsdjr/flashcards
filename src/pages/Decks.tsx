@@ -2,8 +2,16 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/schema'
-import { createDeck, deckStats, type DeckStats } from '../db/queries'
-import { Badge, Button, Card, EmptyState, Field } from '../components/ui'
+import { createDeck, deckStats, toStrength, type DeckStats } from '../db/queries'
+import {
+  Button,
+  EmptyState,
+  Field,
+  Panel,
+  SectionHeading,
+  Spinner,
+} from '../components/ui'
+import { StrengthLegend, StrengthStrip } from '../components/StrengthStrip'
 import { inputClass } from '../lib/classnames'
 import { pluralize } from '../lib/format'
 
@@ -30,41 +38,44 @@ export default function Decks() {
     navigate(`/mazo/${id}`)
   }
 
-  if (!data) return <p className="text-sm text-slate-500">Cargando...</p>
+  if (!data) return <Spinner />
 
   const totalDue = data.decks.reduce((sum, d) => sum + (data.byId.get(d.id!)?.dueNow ?? 0), 0)
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Mis mazos</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {totalDue > 0
-              ? `${pluralize(totalDue, 'tarjeta pendiente', 'tarjetas pendientes')} para hoy.`
-              : 'No tenes tarjetas pendientes por ahora.'}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Link to="/importar">
-            <Button variant="secondary">Importar TSV</Button>
-          </Link>
-          <Button variant="primary" onClick={() => setCreating((v) => !v)}>
-            Nuevo mazo
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-8">
+      <SectionHeading
+        as="h1"
+        title="Mis mazos"
+        description={
+          data.decks.length === 0
+            ? 'Importa un archivo o crea un mazo para empezar.'
+            : totalDue > 0
+              ? `Tenes ${pluralize(totalDue, 'tarjeta lista', 'tarjetas listas')} para repasar.`
+              : 'Estas al dia. No queda nada para repasar por ahora.'
+        }
+        actions={
+          <>
+            <Link to="/importar">
+              <Button variant="secondary">Importar archivo</Button>
+            </Link>
+            <Button variant="primary" onClick={() => setCreating((v) => !v)}>
+              Crear mazo
+            </Button>
+          </>
+        }
+      />
 
       {creating && (
-        <Card className="p-5">
+        <Panel className="p-5">
           <form onSubmit={handleCreate} className="space-y-4">
-            <Field label="Nombre del mazo">
+            <Field label="Nombre">
               <input
                 autoFocus
                 className={inputClass}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Anatomia - Sistema nervioso"
+                placeholder="Anatomia, sistema nervioso"
               />
             </Field>
             <Field label="Descripcion" hint="Opcional.">
@@ -83,54 +94,57 @@ export default function Decks() {
               </Button>
             </div>
           </form>
-        </Card>
+        </Panel>
       )}
 
       {data.decks.length === 0 && !creating ? (
         <EmptyState
-          title="Todavia no hay mazos"
-          description="Crea un mazo vacio o importa directamente un archivo TSV o CSV exportado desde Anki, Excel o Google Sheets."
+          title="Todavia no hay nada que estudiar"
+          description="Importa un TSV o CSV exportado de Anki, Excel o Google Sheets, y las tarjetas quedan listas en segundos."
           action={
             <Link to="/importar">
-              <Button variant="primary">Importar un archivo</Button>
+              <Button variant="primary">Importar archivo</Button>
             </Link>
           }
         />
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
+        <ul className="border-t border-rule">
           {data.decks.map((deck) => {
             const stats = data.byId.get(deck.id!)
+            const due = stats?.dueNow ?? 0
             return (
-              <li key={deck.id}>
-                <Card className="flex h-full flex-col justify-between gap-4 p-5">
-                  <div>
+              <li key={deck.id} className="border-b border-rule">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-4 py-5">
+                  <div className="min-w-0 flex-1">
                     <Link
                       to={`/mazo/${deck.id}`}
-                      className="text-base font-semibold hover:text-indigo-600 dark:hover:text-indigo-400"
+                      className="display text-lg font-medium text-ink transition hover:text-claret"
                     >
                       {deck.name}
                     </Link>
                     {deck.description && (
-                      <p className="mt-1 text-sm text-slate-500">{deck.description}</p>
+                      <p className="mt-0.5 truncate text-sm text-ink-2">{deck.description}</p>
                     )}
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      <Badge tone="blue">{stats?.newCount ?? 0} nuevas</Badge>
-                      <Badge tone="amber">{stats?.learningCount ?? 0} aprendiendo</Badge>
-                      <Badge tone="emerald">{stats?.reviewCount ?? 0} en repaso</Badge>
-                      {(stats?.suspended ?? 0) > 0 && (
-                        <Badge tone="rose">{stats?.suspended} suspendidas</Badge>
-                      )}
+                    <div className="mt-3 max-w-sm space-y-1.5">
+                      <StrengthStrip strength={toStrength(stats!)} />
+                      <StrengthLegend strength={toStrength(stats!)} />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-slate-500">
-                      {stats?.dueNow ? `${stats.dueNow} para estudiar ahora` : 'Al dia'}
-                    </span>
+
+                  <div className="flex items-center gap-5">
+                    <div className="text-right">
+                      <p
+                        className={`display tnum text-3xl font-medium ${due > 0 ? 'text-claret' : 'text-ink-3'}`}
+                      >
+                        {due}
+                      </p>
+                      <p className="text-xs text-ink-2">para hoy</p>
+                    </div>
                     <Link to={`/estudiar/${deck.id}`}>
-                      <Button variant={stats?.dueNow ? 'primary' : 'secondary'}>Estudiar</Button>
+                      <Button variant={due > 0 ? 'primary' : 'secondary'}>Estudiar</Button>
                     </Link>
                   </div>
-                </Card>
+                </div>
               </li>
             )
           })}

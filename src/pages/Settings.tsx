@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { db } from '../db/schema'
 import { downloadBackup, exportBackup, restoreBackup } from '../lib/backup'
-import { Button, Card } from '../components/ui'
+import { Button, Checkbox, Panel, SectionHeading } from '../components/ui'
 
 export default function Settings() {
   const fileInput = useRef<HTMLInputElement>(null)
@@ -17,60 +17,58 @@ export default function Settings() {
       const raw = JSON.parse(await file.text())
       const result = await restoreBackup(raw, replace)
       setMessage(
-        `Restaurados ${result.decks} mazos, ${result.notes} notas y ${result.cards} tarjetas.`,
+        `Se restauraron ${result.decks} mazos, ${result.notes} notas y ${result.cards} tarjetas.`,
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo restaurar el respaldo')
+      setError(err instanceof Error ? err.message : 'Ese archivo no se pudo restaurar')
     } finally {
       if (fileInput.current) fileInput.current.value = ''
     }
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Ajustes</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Todo se guarda en este navegador (IndexedDB). Nada se envia a un servidor. Si borras los
-          datos del sitio o cambias de equipo, vas a necesitar un respaldo.
-        </p>
-      </div>
+    <div className="space-y-10">
+      <SectionHeading
+        as="h1"
+        title="Ajustes"
+        description="Todo vive en este navegador. Nada viaja a un servidor, asi que el respaldo es tu unica copia si cambias de equipo o limpias los datos del sitio."
+      />
 
-      <Card className="p-5">
-        <h2 className="text-base font-semibold">Respaldo</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Exporta todos los mazos, tarjetas y el historial de repasos en un solo archivo JSON.
+      <Panel className="p-5">
+        <h2 className="display text-lg font-medium">Respaldo</h2>
+        <p className="mt-1.5 max-w-prose text-sm text-ink-2">
+          Un archivo JSON con todos los mazos, las tarjetas y el historial de repasos.
         </p>
-        <div className="mt-4">
+        <div className="mt-5">
           <Button
             variant="primary"
             onClick={async () => {
               downloadBackup(await exportBackup())
+              setError('')
               setMessage('Respaldo descargado.')
             }}
           >
             Descargar respaldo
           </Button>
         </div>
-      </Card>
+      </Panel>
 
-      <Card className="p-5">
-        <h2 className="text-base font-semibold">Restaurar</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Carga un respaldo generado por esta app. Por defecto se suma a lo que ya tenes.
+      <Panel className="p-5">
+        <h2 className="display text-lg font-medium">Restaurar</h2>
+        <p className="mt-1.5 max-w-prose text-sm text-ink-2">
+          Carga un respaldo hecho con esta app. Por defecto se suma a lo que ya tenes.
         </p>
-        <label className="mt-3 flex items-center gap-2.5 text-sm">
-          <input
-            type="checkbox"
-            className="size-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-            checked={replace}
-            onChange={(e) => setReplace(e.target.checked)}
-          />
-          Reemplazar todo el contenido actual en lugar de sumarlo
-        </label>
         <div className="mt-4">
+          <Checkbox
+            checked={replace}
+            onChange={setReplace}
+            label="Reemplazar todo en lugar de sumar"
+            hint="Borra los mazos actuales antes de cargar el archivo."
+          />
+        </div>
+        <div className="mt-5">
           <Button variant="secondary" onClick={() => fileInput.current?.click()}>
-            Elegir archivo de respaldo
+            Elegir respaldo
           </Button>
           <input
             ref={fileInput}
@@ -83,16 +81,31 @@ export default function Settings() {
             }}
           />
         </div>
-      </Card>
+      </Panel>
 
-      <Card className="border-rose-200 p-5 dark:border-rose-900">
-        <h2 className="text-base font-semibold text-rose-700 dark:text-rose-400">
-          Borrar todos los datos
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Elimina todos los mazos y el historial de este navegador. Descarga un respaldo antes.
+      {message && <p className="text-sm text-good">{message}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
+
+      <Panel className="p-5">
+        <h2 className="display text-lg font-medium">Como armar el archivo</h2>
+        <p className="mt-1.5 max-w-prose text-sm text-ink-2">
+          Con dos columnas alcanza: pregunta y respuesta. Las columnas se reconocen por su nombre, y
+          si el archivo no trae encabezado se toma la primera como frente y la segunda como reverso.
         </p>
-        <div className="mt-4 flex gap-2">
+        <pre className="mt-4 overflow-x-auto rounded-md border border-rule bg-panel p-4 text-xs text-ink">
+          {`Front\tBack\tTags
+mitocondria\torganelo que produce ATP\tbiologia celula
+ribosoma\tsintetiza proteinas\tbiologia`}
+        </pre>
+      </Panel>
+
+      <Panel className="p-5">
+        <h2 className="display text-lg font-medium text-danger">Borrar todo</h2>
+        <p className="mt-1.5 max-w-prose text-sm text-ink-2">
+          Elimina los mazos y el historial de este navegador. Descarga un respaldo antes si pensas
+          volver a usarlos.
+        </p>
+        <div className="mt-5 flex gap-2">
           {confirmWipe ? (
             <>
               <Button
@@ -102,35 +115,19 @@ export default function Settings() {
                   window.location.reload()
                 }}
               >
-                Si, borrar todo
+                Borrar todos los datos
               </Button>
               <Button variant="ghost" onClick={() => setConfirmWipe(false)}>
                 Cancelar
               </Button>
             </>
           ) : (
-            <Button variant="danger" onClick={() => setConfirmWipe(true)}>
+            <Button variant="secondary" onClick={() => setConfirmWipe(true)}>
               Borrar todo
             </Button>
           )}
         </div>
-      </Card>
-
-      {message && <p className="text-sm text-emerald-600">{message}</p>}
-      {error && <p className="text-sm text-rose-600">{error}</p>}
-
-      <Card className="p-5">
-        <h2 className="text-base font-semibold">Formato de importacion</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          El importador acepta TSV, CSV y archivos separados por punto y coma o barra vertical.
-          Ignora el preambulo <code>#separator:tab</code> que agrega Anki. Ejemplo minimo:
-        </p>
-        <pre className="mt-3 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs text-slate-100">
-{`Front\tBack\tTags
-mitocondria\torganelo que produce ATP\tbiologia celula
-ribosoma\tsintetiza proteinas\tbiologia`}
-        </pre>
-      </Card>
+      </Panel>
     </div>
   )
 }

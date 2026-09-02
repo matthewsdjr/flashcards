@@ -10,12 +10,19 @@ import {
 } from './schema'
 import { applyFsrsCard, schedulerFor, toFsrsCard, type Grade } from '../lib/scheduler'
 
+/** Umbral de Anki para considerar una tarjeta consolidada. */
+export const MATURE_DAYS = 21
+
 export interface DeckStats {
   deckId: number
   total: number
   newCount: number
   learningCount: number
   reviewCount: number
+  /** En repaso con intervalo menor a MATURE_DAYS. */
+  youngCount: number
+  /** En repaso con intervalo de MATURE_DAYS o mas. */
+  matureCount: number
   suspended: number
   /** Cuantas tarjetas se pueden estudiar ahora respetando los limites diarios. */
   dueNow: number
@@ -47,8 +54,20 @@ export async function deckStats(deck: Deck, now = Date.now()): Promise<DeckStats
     newCount: newCards.length,
     learningCount: learning.length,
     reviewCount: review.length,
+    youngCount: review.filter((c) => c.scheduledDays < MATURE_DAYS).length,
+    matureCount: review.filter((c) => c.scheduledDays >= MATURE_DAYS).length,
     suspended: cards.length - active.length,
     dueNow: dueNew + dueLearning + dueReview,
+  }
+}
+
+/** Adapta los conteos del mazo al formato que consume la franja de memoria. */
+export function toStrength(stats: DeckStats) {
+  return {
+    new: stats.newCount,
+    learning: stats.learningCount,
+    young: stats.youngCount,
+    mature: stats.matureCount,
   }
 }
 

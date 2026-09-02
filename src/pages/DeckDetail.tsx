@@ -3,30 +3,38 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CardState, DEFAULT_DECK_CONFIG, db, type DeckConfig } from '../db/schema'
 import {
+  MATURE_DAYS,
   deckStats,
   deleteDeck,
   deleteNote,
   notesOfDeck,
   resetCards,
   setSuspended,
+  toStrength,
 } from '../db/queries'
-import { Badge, Button, Card, EmptyState, Field } from '../components/ui'
+import {
+  Button,
+  Checkbox,
+  Field,
+  Panel,
+  SectionHeading,
+  Spinner,
+  Stat,
+  Tag,
+} from '../components/ui'
+import { StrengthLegend, StrengthStrip } from '../components/StrengthStrip'
 import { cx, inputClass } from '../lib/classnames'
 import { downloadText, exportDeckTsv } from '../lib/backup'
 import { formatDate } from '../lib/format'
 
-const STATE_LABEL: Record<number, string> = {
-  [CardState.New]: 'Nueva',
-  [CardState.Learning]: 'Aprendiendo',
-  [CardState.Review]: 'Repaso',
-  [CardState.Relearning]: 'Reaprendiendo',
-}
-
-const STATE_TONE: Record<number, 'blue' | 'amber' | 'emerald' | 'rose'> = {
-  [CardState.New]: 'blue',
-  [CardState.Learning]: 'amber',
-  [CardState.Review]: 'emerald',
-  [CardState.Relearning]: 'rose',
+/** Etiqueta y color de una tarjeta segun su lugar en la rampa de memoria. */
+function cardState(state: number, scheduledDays: number) {
+  if (state === CardState.New) return { label: 'sin ver', color: 'bg-m-new' }
+  if (state === CardState.Learning) return { label: 'aprendiendo', color: 'bg-m-learning' }
+  if (state === CardState.Relearning) return { label: 'reaprendiendo', color: 'bg-m-learning' }
+  return scheduledDays >= MATURE_DAYS
+    ? { label: 'consolidada', color: 'bg-m-mature' }
+    : { label: 'sabida', color: 'bg-m-young' }
 }
 
 export default function DeckDetail() {
@@ -57,65 +65,69 @@ export default function DeckDetail() {
     )
   }, [data, query])
 
-  if (data === undefined) return <p className="text-sm text-slate-500">Cargando...</p>
+  if (data === undefined) return <Spinner />
   if (data === null) {
     return (
-      <EmptyState
-        title="Mazo no encontrado"
-        description="Es posible que lo hayas borrado."
-        action={
+      <div className="py-16 text-center">
+        <h1 className="display text-2xl font-medium">Ese mazo ya no existe</h1>
+        <div className="mt-6">
           <Link to="/">
-            <Button variant="primary">Volver</Button>
+            <Button variant="primary">Ver mis mazos</Button>
           </Link>
-        }
-      />
+        </div>
+      </div>
     )
   }
 
   const { deck, stats } = data
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Link to="/" className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-            Mazos
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{deck.name}</h1>
-          {deck.description && <p className="mt-1 text-sm text-slate-500">{deck.description}</p>}
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            <Badge tone="blue">{stats.newCount} nuevas</Badge>
-            <Badge tone="amber">{stats.learningCount} aprendiendo</Badge>
-            <Badge tone="emerald">{stats.reviewCount} en repaso</Badge>
-            <Badge>{stats.total} tarjetas</Badge>
-          </div>
+    <div className="space-y-10">
+      <div>
+        <Link to="/" className="text-sm text-ink-2 transition hover:text-ink">
+          Mazos
+        </Link>
+        <div className="mt-2">
+          <SectionHeading
+            as="h1"
+            title={deck.name}
+            description={deck.description || undefined}
+            actions={
+              <>
+                <Link to={`/importar?deck=${deck.id}`}>
+                  <Button variant="secondary">Importar</Button>
+                </Link>
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    const tsv = await exportDeckTsv(deckId)
+                    downloadText(`${deck.name.replace(/[^\w\s-]/g, '').trim()}.tsv`, tsv)
+                  }}
+                >
+                  Exportar TSV
+                </Button>
+                <Link to={`/estudiar/${deck.id}`}>
+                  <Button variant="primary">Estudiar {stats.dueNow > 0 && stats.dueNow}</Button>
+                </Link>
+              </>
+            }
+          />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link to={`/importar?deck=${deck.id}`}>
-            <Button variant="secondary">Importar</Button>
-          </Link>
-          <Button
-            variant="secondary"
-            onClick={async () => {
-              const tsv = await exportDeckTsv(deckId)
-              downloadText(`${deck.name.replace(/[^\w\s-]/g, '')}.tsv`, tsv)
-            }}
-          >
-            Exportar TSV
-          </Button>
-          <Link to={`/estudiar/${deck.id}`}>
-            <Button variant="primary">Estudiar ({stats.dueNow})</Button>
-          </Link>
+
+        <div className="mt-6 max-w-lg space-y-2.5">
+          <StrengthStrip strength={toStrength(stats)} height="h-2" />
+          <StrengthLegend strength={toStrength(stats)} />
         </div>
       </div>
 
-      <Card className="p-5">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold">Configuracion del mazo</h2>
+      <Panel className="p-5">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="display text-lg font-medium">Ritmo de estudio</h2>
           <Button variant="ghost" onClick={() => setEditingConfig((v) => !v)}>
-            {editingConfig ? 'Cerrar' : 'Editar'}
+            {editingConfig ? 'Cerrar' : 'Ajustar'}
           </Button>
         </div>
+
         {editingConfig ? (
           <ConfigForm
             config={deck.config}
@@ -125,60 +137,67 @@ export default function DeckDetail() {
             }}
           />
         ) : (
-          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-4">
-            <ConfigItem label="Nuevas por dia" value={deck.config.newPerDay} />
-            <ConfigItem label="Repasos por dia" value={deck.config.reviewsPerDay} />
-            <ConfigItem
-              label="Retencion objetivo"
+          <div className="mt-5 grid grid-cols-2 gap-6 sm:grid-cols-4">
+            <Stat value={deck.config.newPerDay} label="nuevas por dia" />
+            <Stat value={deck.config.reviewsPerDay} label="repasos por dia" />
+            <Stat
               value={`${Math.round(deck.config.requestRetention * 100)}%`}
+              label="retencion objetivo"
             />
-            <ConfigItem
-              label="Tarjeta inversa"
-              value={deck.config.generateReverse ? 'Si' : 'No'}
-            />
-          </dl>
+            <Stat value={deck.config.generateReverse ? 'Si' : 'No'} label="tarjeta inversa" />
+          </div>
         )}
-      </Card>
+      </Panel>
 
-      <Card className="p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-semibold">Tarjetas</h2>
-          <input
-            className={cx(inputClass, 'max-w-64')}
-            placeholder="Buscar en el mazo..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
+      <div>
+        <SectionHeading
+          title="Tarjetas"
+          actions={
+            <input
+              className={cx(inputClass, 'w-56')}
+              placeholder="Buscar"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          }
+        />
 
         {filtered.length === 0 ? (
-          <p className="py-8 text-center text-sm text-slate-500">
+          <p className="py-12 text-center text-sm text-ink-2">
             {data.notes.length === 0
-              ? 'Este mazo todavia no tiene tarjetas. Importa un TSV para empezar.'
-              : 'Ninguna tarjeta coincide con la busqueda.'}
+              ? 'Este mazo esta vacio. Importa un archivo para llenarlo.'
+              : 'Ninguna tarjeta coincide con esa busqueda.'}
           </p>
         ) : (
-          <ul className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
+          <ul className="mt-5 border-t border-rule">
             {filtered.slice(0, 200).map(({ note, cards }) => (
-              <li key={note.id} className="py-3">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{note.front}</p>
-                    <p className="truncate text-sm text-slate-500">{note.back}</p>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                      {cards.map((card) => (
-                        <Badge key={card.id} tone={STATE_TONE[card.state]}>
-                          {STATE_LABEL[card.state]}
-                          {card.state !== CardState.New && ` - ${formatDate(card.due)}`}
-                          {card.suspended === 1 && ' (suspendida)'}
-                        </Badge>
-                      ))}
+              <li key={note.id} className="group border-b border-rule">
+                <div className="flex items-start justify-between gap-5 py-3.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-ink">{note.front}</p>
+                    <p className="mt-0.5 truncate text-sm text-ink-2">{note.back}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      {cards.map((card) => {
+                        const state = cardState(card.state, card.scheduledDays)
+                        return (
+                          <span
+                            key={card.id}
+                            className="flex items-center gap-1.5 text-xs text-ink-2"
+                          >
+                            <span aria-hidden className={cx('size-2 rounded-full', state.color)} />
+                            {state.label}
+                            {card.state !== CardState.New && ` hasta ${formatDate(card.due)}`}
+                            {card.suspended === 1 && ' (en pausa)'}
+                          </span>
+                        )
+                      })}
                       {note.tags.map((tag) => (
-                        <Badge key={tag}>{tag}</Badge>
+                        <Tag key={tag}>{tag}</Tag>
                       ))}
                     </div>
                   </div>
-                  <div className="flex shrink-0 gap-1">
+
+                  <div className="flex shrink-0 gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
                     <Button
                       variant="ghost"
                       className="px-2 py-1 text-xs"
@@ -196,11 +215,11 @@ export default function DeckDetail() {
                         )
                       }
                     >
-                      {cards.every((c) => c.suspended === 1) ? 'Reanudar' : 'Suspender'}
+                      {cards.every((c) => c.suspended === 1) ? 'Reanudar' : 'Pausar'}
                     </Button>
                     <Button
                       variant="ghost"
-                      className="px-2 py-1 text-xs text-rose-600"
+                      className="px-2 py-1 text-xs text-danger"
                       onClick={() => void deleteNote(note.id!)}
                     >
                       Borrar
@@ -212,18 +231,19 @@ export default function DeckDetail() {
           </ul>
         )}
         {filtered.length > 200 && (
-          <p className="mt-3 text-center text-xs text-slate-400">
-            Mostrando las primeras 200 de {filtered.length} tarjetas.
+          <p className="mt-4 text-center text-xs text-ink-3">
+            Se muestran 200 de {filtered.length} tarjetas. Afina la busqueda para ver el resto.
           </p>
         )}
-      </Card>
+      </div>
 
-      <Card className="border-rose-200 p-5 dark:border-rose-900">
-        <h2 className="text-base font-semibold text-rose-700 dark:text-rose-400">Zona peligrosa</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Borrar el mazo elimina sus tarjetas y todo el historial de repasos. No se puede deshacer.
+      <Panel className="p-5">
+        <h2 className="display text-lg font-medium text-danger">Borrar el mazo</h2>
+        <p className="mt-1.5 max-w-prose text-sm text-ink-2">
+          Se van las {stats.total} tarjetas y todo su historial de repasos. No hay vuelta atras, asi
+          que descarga un respaldo desde Ajustes si te sirve conservarlo.
         </p>
-        <div className="mt-4 flex gap-2">
+        <div className="mt-5 flex gap-2">
           {confirmDelete ? (
             <>
               <Button
@@ -233,28 +253,19 @@ export default function DeckDetail() {
                   navigate('/')
                 }}
               >
-                Si, borrar {deck.name}
+                Borrar {deck.name}
               </Button>
               <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
                 Cancelar
               </Button>
             </>
           ) : (
-            <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+            <Button variant="secondary" onClick={() => setConfirmDelete(true)}>
               Borrar mazo
             </Button>
           )}
         </div>
-      </Card>
-    </div>
-  )
-}
-
-function ConfigItem({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
-      <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className="font-semibold tabular-nums">{value}</dd>
+      </Panel>
     </div>
   )
 }
@@ -270,13 +281,13 @@ function ConfigForm({
 
   return (
     <form
-      className="mt-4 space-y-4"
+      className="mt-5 space-y-5"
       onSubmit={(e) => {
         e.preventDefault()
         void onSave(draft)
       }}
     >
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-5 sm:grid-cols-3">
         <Field label="Nuevas por dia">
           <input
             type="number"
@@ -297,10 +308,7 @@ function ConfigForm({
             onChange={(e) => setDraft({ ...draft, reviewsPerDay: Number(e.target.value) })}
           />
         </Field>
-        <Field
-          label="Retencion objetivo (%)"
-          hint="Mas alto significa repasos mas frecuentes. Recomendado: 90."
-        >
+        <Field label="Retencion objetivo" hint="Mas alto, repasos mas seguidos. 90 es lo habitual.">
           <input
             type="number"
             min={70}
@@ -315,14 +323,14 @@ function ConfigForm({
             }
           />
         </Field>
-        <Field label="Pasos de aprendizaje" hint="Separados por espacio. Ej: 1m 10m">
+        <Field label="Pasos de aprendizaje" hint="Separados por espacio. Por ejemplo: 1m 10m">
           <input
             className={inputClass}
             value={draft.learningSteps.join(' ')}
             onChange={(e) => setDraft({ ...draft, learningSteps: e.target.value.split(/\s+/) })}
           />
         </Field>
-        <Field label="Pasos de reaprendizaje" hint="Se aplican cuando fallas una tarjeta.">
+        <Field label="Pasos al fallar" hint="Se aplican cuando respondes Otra vez.">
           <input
             className={inputClass}
             value={draft.relearningSteps.join(' ')}
@@ -330,18 +338,17 @@ function ConfigForm({
           />
         </Field>
       </div>
-      <label className="flex items-center gap-2.5 text-sm">
-        <input
-          type="checkbox"
-          className="size-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-          checked={draft.generateReverse}
-          onChange={(e) => setDraft({ ...draft, generateReverse: e.target.checked })}
-        />
-        Generar tarjeta inversa en las proximas importaciones
-      </label>
+
+      <Checkbox
+        checked={draft.generateReverse}
+        onChange={(generateReverse) => setDraft({ ...draft, generateReverse })}
+        label="Generar tarjeta inversa al importar"
+        hint="Afecta solo a las importaciones futuras de este mazo."
+      />
+
       <div className="flex justify-end">
         <Button type="submit" variant="primary">
-          Guardar configuracion
+          Guardar cambios
         </Button>
       </div>
     </form>
