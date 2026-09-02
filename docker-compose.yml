@@ -1,0 +1,11 @@
+services:
+  flashcards:
+    build:
+      context: .
+      args:
+        BASE_PATH: /
+    image: flashcards:latest
+    container_name: flashcards
+    restart: unless-stopped
+    ports:
+      - "8080:80"
