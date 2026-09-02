@@ -2,6 +2,8 @@
 
 Aplicación web para estudiar con repetición espaciada, al estilo de Anki. Importás tus mazos desde archivos **TSV o CSV**, estudiás con el algoritmo **FSRS** (el mismo que usa Anki hoy) y todo queda guardado en tu cuenta, en tu propio servidor.
 
+En producción: **https://flashcards.kivortech.com**
+
 ## Características
 
 - **Cuentas con registro por invitación.** El registro está cerrado: sólo quien tenga un código puede crear cuenta. La primera cuenta del servidor queda como administradora y es la que reparte los códigos.
@@ -33,9 +35,20 @@ docker run --rm -v flashcards-datos:/datos -v "$PWD":/salida alpine \
   tar czf /salida/flashcards-datos.tgz -C /datos .
 ```
 
-### Detrás de un proxy inverso con HTTPS
+### Salir a internet por un túnel de Cloudflare
 
-En `docker-compose.yml`, poné `TRUST_PROXY: "true"`. Con eso la cookie de sesión viaja como `Secure` y el límite de peticiones usa la IP real del visitante en lugar de la del proxy.
+El contenedor se suma a la red donde ya corre `cloudflared`, declarada como **externa** en el compose para no tocar el stack de ese túnel. La variable `TUNNEL_NETWORK` dice cuál es (por defecto `kivor_default`).
+
+En el panel de Cloudflare Zero Trust, en el túnel, agregá un *public hostname* apuntando al servicio **`http://flashcards:3000`** — el nombre del contenedor, no la IP del host: así el tráfico nunca sale de la máquina. El túnel toma la configuración remota en vivo, sin reiniciar nada.
+
+Cómo queda la seguridad con eso puesto:
+
+- `TRUST_PROXY` es una **lista de CIDR**, no `true`. Sólo se cree la cabecera `X-Forwarded-For` cuando la petición viene de la red de contenedores, que es por donde entra el túnel; quien alcance el puerto publicado en la red privada no puede falsear su IP para esquivar el límite de intentos.
+- `COOKIE_SECURE: "auto"` deja convivir los dos accesos: por el subdominio la cookie viaja como `Secure`, y por la red privada en HTTP sigue funcionando.
+- Una petición que llegue por **HTTP plano a través del túnel se redirige a HTTPS** antes de tocar nada, y las respuestas cifradas llevan `Strict-Transport-Security`. Las conexiones directas de la red privada no traen `X-Forwarded-Proto` y siguen andando sin cifrado.
+- Conviene además activar *Always Use HTTPS* en Cloudflare (SSL/TLS → Edge Certificates) para que la redirección ocurra en el borde y la petición ni llegue al origen.
+
+**Cloudflare inyecta su script de Web Analytics** en las páginas del túnel. Si preferís que no haya JavaScript de terceros, se desactiva en el panel del dominio.
 
 ## Desplegar
 
