@@ -8,14 +8,22 @@ services:
     container_name: flashcards
     restart: unless-stopped
     ports:
+      # Acceso directo por la red privada. Comentalo si queres que la app solo
+      # sea alcanzable a traves del tunel.
       - "8080:3000"
     environment:
-      # Poner en true si un proxy inverso con TLS queda por delante: hace que
-      # la cookie de sesion viaje como Secure y respeta X-Forwarded-For.
-      TRUST_PROXY: "false"
+      # Solo se confia en X-Forwarded-* cuando la peticion viene de una red
+      # de contenedores, que es por donde entra el tunel. Asi nadie que llegue
+      # al puerto 8080 puede falsear su IP para esquivar el limite de intentos.
+      TRUST_PROXY: "172.16.0.0/12"
+      # 'auto' decide segun el protocolo real: la cookie viaja como Secure a
+      # traves del tunel (HTTPS) y sigue funcionando por HTTP en la red privada.
       COOKIE_SECURE: "auto"
     volumes:
       - flashcards-datos:/app/datos
+    networks:
+      - default
+      - tunel
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/mazos/_ping"]
       interval: 30s
@@ -27,6 +35,14 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  default:
+  # Red donde ya corre cloudflared. Se declara externa para no tocar el compose
+  # de ese stack: flashcards se suma a su red, no al reves.
+  tunel:
+    external: true
+    name: ${TUNNEL_NETWORK:-kivor_default}
 
 volumes:
   flashcards-datos:

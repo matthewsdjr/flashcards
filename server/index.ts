@@ -14,6 +14,12 @@ import rutasMazos from './rutas/mazos.ts'
 import rutasImportar from './rutas/importar.ts'
 import rutasVarios from './rutas/varios.ts'
 
+function parseTrustProxy(value: string | undefined): boolean | string {
+  if (!value || value === 'false') return false
+  if (value === 'true') return true
+  return value
+}
+
 const PORT = Number(process.env.PORT ?? 3000)
 const HOST = process.env.HOST ?? '0.0.0.0'
 const CLIENT_DIR = resolve(process.env.CLIENT_DIR ?? './dist')
@@ -31,7 +37,10 @@ const app = Fastify({
       }),
     },
   },
-  trustProxy: process.env.TRUST_PROXY === 'true',
+  // Acepta 'true', 'false' o una lista de IPs/CIDR. Lo segundo es lo correcto
+  // detras de un tunel: solo se confia en la cabecera X-Forwarded-For cuando
+  // viene de la red del proxy, y no de cualquiera que alcance el puerto.
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   bodyLimit: 32 * 1024 * 1024,
 })
 
