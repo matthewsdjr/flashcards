@@ -310,6 +310,21 @@ async function main() {
   })
   check('rechaza una contraseña incorrecta', rechazo.status === 401, String(rechazo.status))
 
+  // Cloudflare agrega cabeceras de cuerpo a los POST vacios; sin el parser
+  // permisivo esto responde 415 y cerrar sesion queda roto en produccion.
+  const vacioConTipo = await fetch(`${BASE}/api/auth/salir`, {
+    method: 'POST',
+    headers: { Cookie: ana.cookie, 'Content-Type': 'application/octet-stream' },
+  })
+  check('acepta un POST sin cuerpo con content-type desconocido', vacioConTipo.status === 200, String(vacioConTipo.status))
+
+  const cuerpoRaro = await fetch(`${BASE}/api/auth/salir`, {
+    method: 'POST',
+    headers: { Cookie: ana.cookie, 'Content-Type': 'application/octet-stream' },
+    body: 'contenido inesperado',
+  })
+  check('rechaza un cuerpo con tipo desconocido', cuerpoRaro.status === 415, String(cuerpoRaro.status))
+
   const salida = await ana.post('/auth/salir')
   check('cierra la sesion', salida.status === 200)
   const trasSalir = await ana.get('/mazos')

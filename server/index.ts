@@ -54,7 +54,30 @@ await app.register(rateLimit, {
   keyGenerator: (request) => request.ip,
 })
 
-app.addHook('onRequest', async (request) => {
+/*
+ * Cloudflare agrega cabeceras de cuerpo a los POST que no lo tienen, y Fastify
+ * los rechaza con 415 al no encontrar un parser para ese content-type. Un
+ * cuerpo vacio es perfectamente valido, asi que se acepta; uno con contenido y
+ * un tipo desconocido se sigue rechazando.
+ */
+app.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, body, done) => {
+  if ((body as Buffer).length === 0) {
+    done(null, undefined)
+    return
+  }
+  const error = new Error('Unsupported Media Type') as Error & { statusCode?: number }
+  error.statusCode = 415
+  done(error, undefined)
+})
+
+app.addHook('onRequest', async (request, reply) => {
+  // Detras del tunel, una peticion que llego por HTTP plano se redirige a
+  // HTTPS antes de tocar nada: la cookie de sesion no puede viajar en claro
+  // por internet. Las conexiones directas de la red privada no traen esta
+  // cabecera y siguen funcionando sin cifrado.
+  if (request.headers['x-forwarded-proto'] === 'http') {
+    return reply.redirect(`https://${request.hostname}${request.url}`, 301)
+  }
   request.usuario = loadUser(request)
 })
 
@@ -62,6 +85,13 @@ app.addHook('onSend', async (request, reply, payload) => {
   reply.header('X-Content-Type-Options', 'nosniff')
   reply.header('X-Frame-Options', 'SAMEORIGIN')
   reply.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+
+  // HSTS solo cuando la peticion vino cifrada. Sin includeSubDomains ni
+  // preload: aplica a este host y nada mas, y se puede revertir bajando
+  // max-age sin arrastrar a otros subdominios del dominio.
+  if (request.headers['x-forwarded-proto'] === 'https' || request.protocol === 'https') {
+    reply.header('Strict-Transport-Security', 'max-age=15552000')
+  }
 
   // Los assets llevan hash en el nombre: se cachean indefinidamente. Todo lo
   // demas, incluido el HTML, se revalida para que un deploy se vea al instante.
