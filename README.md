@@ -7,6 +7,7 @@ En producción: **https://flashcards.kivortech.com**
 ## Características
 
 - **Cuentas con registro por invitación.** El registro está cerrado: sólo quien tenga un código puede crear cuenta. La primera cuenta del servidor queda como administradora y es la que reparte los códigos.
+- **Panel de administración** en *Cuentas*: quiénes tienen acceso, con sus mazos, tarjetas, repasos, última actividad y sesiones abiertas; generar y anular invitaciones; cerrar las sesiones de una cuenta o eliminarla. No podés borrar tu propia cuenta ni dejar el servidor sin administrador.
 - **Tus mazos te siguen a cualquier dispositivo.** El servidor es la fuente de verdad; entrás desde el teléfono o la laptop y encontrás el mismo progreso.
 - **Importación TSV / CSV** con detección automática del separador (tab, coma, punto y coma, barra vertical) y del encabezado. Ignora el preámbulo `#separator:tab` que agrega Anki en sus exportaciones.
 - **Mapeo visual de columnas**: elegís qué columna es el frente, el reverso, la pista, las notas adicionales o las etiquetas.
@@ -117,14 +118,14 @@ server/
 ├── auth.ts      scrypt, sesiones e invitaciones
 ├── contexto.ts  Sesión de la petición, permisos, zona horaria
 ├── datos.ts     Consultas por usuario: mazos, colas, calificación
-└── rutas/       auth, mazos, importaciones, estadísticas e invitaciones
+└── rutas/       auth, mazos, importaciones, usuarios, estadísticas e invitaciones
 
 src/
 ├── api/         Cliente HTTP y hooks de consulta
 ├── auth/        Contexto de sesión
 ├── components/  Interfaz compartida y la franja de memoria
 ├── lib/         Tema, formato, clases y migración desde IndexedDB
-└── pages/       Entrar, mazos, detalle, importación, estudio, progreso, ajustes, invitaciones
+└── pages/       Entrar, mazos, detalle, importación, estudio, progreso, ajustes, cuentas
 ```
 
 ### Cómo se aísla una cuenta de otra
@@ -142,7 +143,7 @@ Si usaste la versión que guardaba todo en el navegador, al entrar por primera v
 - Hace falta conexión con el servidor: no hay modo sin conexión.
 - El contenido de las tarjetas se muestra como texto plano; no se renderiza HTML ni imágenes.
 - No se importan archivos `.apkg` de Anki (son un ZIP con una base SQLite adentro).
-- No hay recuperación de contraseña por email: si alguien la pierde, se le crea una cuenta nueva con otra invitación.
+- No hay recuperación de contraseña por email. Para una cuenta común, quien administre puede eliminarla y volver a invitar; si se pierde la de la única cuenta administradora, hay que tocar la base a mano.
 
 ## Licencia
 

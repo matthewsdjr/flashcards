@@ -34,3 +34,21 @@ export function formatDuration(ms: number): string {
 export function pluralize(n: number, singular: string, plural: string): string {
   return `${n} ${n === 1 ? singular : plural}`
 }
+
+/** Distancia hasta ahora en lenguaje natural: "hace 3 dias", "hoy". */
+export function formatRelative(ms: number, now = Date.now()): string {
+  const diff = now - ms
+  if (diff < 0) return 'en el futuro'
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 2) return 'ahora mismo'
+  if (minutes < 60) return `hace ${minutes} minutos`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return hours === 1 ? 'hace una hora' : `hace ${hours} horas`
+  const days = Math.floor(hours / 24)
+  if (days === 1) return 'ayer'
+  if (days < 30) return `hace ${days} dias`
+  const months = Math.floor(days / 30.4375)
+  if (months < 12) return months === 1 ? 'hace un mes' : `hace ${months} meses`
+  const years = Math.floor(days / 365.25)
+  return years === 1 ? 'hace un anio' : `hace ${years} anios`
+}

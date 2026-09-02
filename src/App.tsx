@@ -6,7 +6,7 @@ import Study from './pages/Study.tsx'
 import Stats from './pages/Stats.tsx'
 import Settings from './pages/Settings.tsx'
 import Entrar from './pages/Entrar.tsx'
-import Invitaciones from './pages/Invitaciones.tsx'
+import Cuentas from './pages/Cuentas.tsx'
 import { cx } from './lib/classnames.ts'
 import { useTheme, type Theme } from './lib/theme.ts'
 import { ProveedorSesion, useSesion } from './auth/SesionContext.tsx'
@@ -53,7 +53,7 @@ function Shell() {
     { to: '/importar', label: 'Importar', end: false },
     { to: '/estadisticas', label: 'Progreso', end: false },
     { to: '/ajustes', label: 'Ajustes', end: false },
-    ...(usuario?.isAdmin ? [{ to: '/invitaciones', label: 'Invitaciones', end: false }] : []),
+    ...(usuario?.isAdmin ? [{ to: '/cuentas', label: 'Cuentas', end: false }] : []),
   ]
 
   return (
@@ -112,7 +112,7 @@ function Shell() {
           <Route path="/estudiar/:deckId" element={<Study />} />
           <Route path="/estadisticas" element={<Stats />} />
           <Route path="/ajustes" element={<Settings />} />
-          <Route path="/invitaciones" element={<Invitaciones />} />
+          <Route path="/cuentas" element={<Cuentas />} />
         </Routes>
       </main>
     </div>

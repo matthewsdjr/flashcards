@@ -151,6 +151,22 @@ export interface ImportRecord {
   createdAt: number
 }
 
+/** Vista de una cuenta para el panel de administracion. */
+export interface AdminUser {
+  id: number
+  email: string
+  name: string
+  isAdmin: boolean
+  createdAt: number
+  deckCount: number
+  cardCount: number
+  reviewCount: number
+  /** Ultimo repaso registrado, o null si nunca estudio. */
+  lastActivity: number | null
+  /** Sesiones abiertas y todavia validas. */
+  sessions: number
+}
+
 export interface Invite {
   code: string
   createdAt: number

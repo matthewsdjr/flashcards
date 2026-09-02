@@ -12,6 +12,7 @@ import { DATA_DIR } from './db.ts'
 import rutasAuth from './rutas/auth.ts'
 import rutasMazos from './rutas/mazos.ts'
 import rutasImportar from './rutas/importar.ts'
+import rutasUsuarios from './rutas/usuarios.ts'
 import rutasVarios from './rutas/varios.ts'
 
 function parseTrustProxy(value: string | undefined): boolean | string {
@@ -109,6 +110,7 @@ app.addHook('onSend', async (request, reply, payload) => {
 await app.register(rutasAuth, { prefix: '/api/auth' })
 await app.register(rutasMazos, { prefix: '/api/mazos' })
 await app.register(rutasImportar, { prefix: '/api/importaciones' })
+await app.register(rutasUsuarios, { prefix: '/api/usuarios' })
 await app.register(rutasVarios, { prefix: '/api' })
 
 app.setErrorHandler((error: FastifyError, request, reply) => {

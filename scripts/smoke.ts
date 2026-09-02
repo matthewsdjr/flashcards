@@ -302,6 +302,70 @@ async function main() {
   check('el mazo restaurado es de beto', mazosBeto.data?.decks?.length === 1)
   check('y es distinto del de ana', mazosBeto.data.decks[0].id !== mazoAna)
 
+  console.log('\nPanel de cuentas')
+  const listaBeto = await beto.get('/usuarios')
+  check('quien no es admin no ve las cuentas', listaBeto.status === 403, String(listaBeto.status))
+
+  const lista = await ana.get('/usuarios')
+  check('la admin ve las dos cuentas', lista.data?.users?.length === 2, String(lista.data?.users?.length))
+
+  const fichaAna = lista.data.users.find((u: any) => u.email === 'ana@ejemplo.com')
+  const fichaBeto = lista.data.users.find((u: any) => u.email === 'beto@ejemplo.com')
+  check('marca quien administra', fichaAna?.isAdmin === true && fichaBeto?.isAdmin === false)
+  check('cuenta los mazos de cada uno', fichaAna?.deckCount === 1 && fichaBeto?.deckCount === 1, `${fichaAna?.deckCount}/${fichaBeto?.deckCount}`)
+  check('cuenta las tarjetas de cada uno', fichaAna?.cardCount === 10 && fichaBeto?.cardCount === 10, `${fichaAna?.cardCount}/${fichaBeto?.cardCount}`)
+  check('cuenta los repasos', fichaAna?.reviewCount >= 1 && fichaBeto?.reviewCount === 0, `${fichaAna?.reviewCount}/${fichaBeto?.reviewCount}`)
+  check('registra la ultima actividad', typeof fichaAna?.lastActivity === 'number' && fichaBeto?.lastActivity === null)
+  check('cuenta las sesiones abiertas', fichaAna?.sessions === 1 && fichaBeto?.sessions === 1, `${fichaAna?.sessions}/${fichaBeto?.sessions}`)
+  check('no expone el hash de la contrasenia', !JSON.stringify(lista.data).includes('scrypt$'))
+
+  const borrarseSola = await ana.del(`/usuarios/${fichaAna.id}`)
+  check('la admin no puede borrarse a si misma', borrarseSola.status === 400, String(borrarseSola.status))
+
+  const betoBorraAna = await beto.del(`/usuarios/${fichaAna.id}`)
+  check('quien no es admin no puede borrar cuentas', betoBorraAna.status === 403, String(betoBorraAna.status))
+
+  const betoCierraAna = await beto.post(`/usuarios/${fichaAna.id}/cerrar-sesiones`)
+  check('quien no es admin no puede cerrar sesiones ajenas', betoCierraAna.status === 403)
+
+  const inexistente = await ana.del('/usuarios/999999')
+  check('borrar una cuenta inexistente da 404', inexistente.status === 404, String(inexistente.status))
+
+  // Cerrar las sesiones de beto lo deja fuera sin tocar sus datos.
+  const cierre = await ana.post(`/usuarios/${fichaBeto.id}/cerrar-sesiones`)
+  check('la admin cierra las sesiones de otra cuenta', cierre.status === 200)
+  check('y sabe que no eran las propias', cierre.data?.esPropia === false)
+  const betoExpulsado = await beto.get('/mazos')
+  check('beto queda fuera tras cerrarle las sesiones', betoExpulsado.status === 401, String(betoExpulsado.status))
+
+  const betoVuelve = await beto.post('/auth/entrar', {
+    email: 'beto@ejemplo.com',
+    password: 'otra-clave-456',
+  })
+  check('beto puede volver a entrar con su contrasenia', betoVuelve.status === 200, String(betoVuelve.status))
+  const betoSigueTeniendo = await beto.get('/mazos')
+  check('sus mazos siguen ahi', betoSigueTeniendo.data?.decks?.length === 1)
+
+  // Borrar la cuenta se lleva su contenido, sin tocar el de la otra.
+  const borrado = await ana.del(`/usuarios/${fichaBeto.id}`)
+  check('la admin elimina la cuenta', borrado.status === 200, String(borrado.status))
+  const listaFinal = await ana.get('/usuarios')
+  check('queda una sola cuenta', listaFinal.data?.users?.length === 1)
+  const betoMuerto = await beto.get('/mazos')
+  check('la sesion de la cuenta borrada ya no vale', betoMuerto.status === 401)
+  const anaIntacta = await ana.get('/mazos')
+  check('el contenido de la admin queda intacto', anaIntacta.data?.decks?.length === 1)
+
+  // Los archivos subidos viven en disco y no los alcanza el CASCADE.
+  const archivosHuerfanos = await fetch(`${BASE}/api/importaciones`, {
+    headers: { Cookie: ana.cookie },
+  }).then((r) => r.json())
+  check('la admin conserva su propia importacion', archivosHuerfanos.imports.length === 1)
+
+  const invitesTrasBorrado = await ana.get('/invitaciones')
+  check('la invitacion usada sobrevive al borrado', invitesTrasBorrado.data?.invites?.length === 1)
+  check('y deja de apuntar a una cuenta', invitesTrasBorrado.data.invites[0].usedBy === null)
+
   console.log('\nCierre de sesion')
   const malPass = new Cliente()
   const rechazo = await malPass.post('/auth/entrar', {
