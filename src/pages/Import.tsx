@@ -11,6 +11,7 @@ import {
   Stat,
   Tag,
 } from '../components/ui.tsx'
+import { Contenido } from '../components/Contenido.tsx'
 import { cx, inputClass } from '../lib/classnames.ts'
 import { FIELD_ROLE_LABELS, delimiterName, guessMapping, splitTags, type FieldRole } from '../../shared/parse.ts'
 import type { DeckWithStats } from '../../shared/tipos.ts'
@@ -334,13 +335,19 @@ export default function Import() {
             <ul className="mt-5 space-y-2">
               {previews.map((note, i) => (
                 <li key={i} className="rounded-lg border border-rule bg-paper px-4 py-3">
-                  <p className="card-face text-base text-ink">
-                    {note.front || <span className="text-danger">falta el frente</span>}
-                  </p>
-                  <p className="mt-1 text-sm text-ink-2">
-                    {note.back || <span className="text-danger">falta el reverso</span>}
-                  </p>
-                  {note.hint && <p className="mt-1.5 text-xs text-ink-3">Pista: {note.hint}</p>}
+                  {note.front ? (
+                    <Contenido texto={note.front} className="card-face text-base text-ink" />
+                  ) : (
+                    <p className="card-face text-base text-danger">falta el frente</p>
+                  )}
+                  {note.back ? (
+                    <Contenido texto={note.back} className="mt-1 text-sm text-ink-2" />
+                  ) : (
+                    <p className="mt-1 text-sm text-danger">falta el reverso</p>
+                  )}
+                  {note.hint && (
+                    <Contenido texto={note.hint} className="mt-1.5 text-xs text-ink-3" />
+                  )}
                   {note.tags.length > 0 && (
                     <div className="mt-2.5 flex flex-wrap gap-1.5">
                       {note.tags.map((tag) => (

@@ -200,6 +200,37 @@
   letter-spacing: -0.01em;
 }
 
+/*
+ * KaTeX trae su propia tipografia y su propio tamano. Se atempera para que la
+ * formula pese como el texto que la rodea y no desborde la ficha en el telefono.
+ */
+.katex {
+  font-size: 1.05em;
+  color: inherit;
+}
+
+.katex-display {
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
+}
+
+/*
+ * KaTeX parte la formula en trozos en los signos de relacion y en las sumas.
+ * Dejandolos fluir, una ecuacion larga baja de renglon en el telefono en vez
+ * de salirse de la ficha; lo que aun no entre se puede arrastrar de costado.
+ */
+.katex-display > .katex {
+  white-space: normal;
+  font-size: 0.9em;
+}
+
+/* Dentro de una linea recortada la formula no debe empujar el resto. */
+.truncate .katex-display {
+  display: inline;
+}
+
 .display {
   font-family: var(--font-display);
   font-optical-sizing: auto;

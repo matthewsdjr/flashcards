@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/cliente.ts'
 import { Button, EmptyState, Panel, Spinner, Stat, Tag } from '../components/ui.tsx'
+import { Contenido } from '../components/Contenido.tsx'
 import { cx } from '../lib/classnames.ts'
 import { formatDuration, formatInterval } from '../lib/format.ts'
 import { GRADES, GRADE_KEYS, GRADE_LABELS, GRADE_RULE, GRADE_TEXT } from '../lib/calificaciones.ts'
@@ -228,14 +229,18 @@ export default function Study() {
           onClick={() => !revealed && setRevealed(true)}
           className="flex min-h-56 flex-col items-center justify-center gap-5 px-8 py-12 text-center focus-visible:outline-none sm:px-14"
         >
-          <p className="card-face text-3xl leading-snug whitespace-pre-wrap text-ink sm:text-4xl">
-            {question}
-          </p>
+          <Contenido
+            texto={question}
+            className="card-face text-3xl leading-snug whitespace-pre-wrap text-ink sm:text-4xl"
+          />
 
           {note.hint &&
             !revealed &&
             (showHint ? (
-              <p className="max-w-md text-sm whitespace-pre-wrap text-ink-2">{note.hint}</p>
+              <Contenido
+                texto={note.hint}
+                className="max-w-md text-sm whitespace-pre-wrap text-ink-2"
+              />
             ) : (
               <button
                 onClick={(e) => {
@@ -252,13 +257,15 @@ export default function Study() {
 
         {revealed && (
           <div className="animate-reveal border-t border-rule px-8 py-10 text-center sm:px-14">
-            <p className="card-face text-2xl leading-snug whitespace-pre-wrap text-ink sm:text-3xl">
-              {answer}
-            </p>
+            <Contenido
+              texto={answer}
+              className="card-face text-2xl leading-snug whitespace-pre-wrap text-ink sm:text-3xl"
+            />
             {note.extra && (
-              <p className="mx-auto mt-5 max-w-md text-sm leading-relaxed whitespace-pre-wrap text-ink-2">
-                {note.extra}
-              </p>
+              <Contenido
+                texto={note.extra}
+                className="mx-auto mt-5 max-w-md text-sm leading-relaxed whitespace-pre-wrap text-ink-2"
+              />
             )}
             {note.tags.length > 0 && (
               <div className="mt-6 flex flex-wrap justify-center gap-1.5">

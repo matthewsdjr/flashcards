@@ -13,6 +13,7 @@ En producción: **https://flashcards.kivortech.com**
 - **Mapeo visual de columnas**: elegís qué columna es el frente, el reverso, la pista, las notas adicionales o las etiquetas.
 - **Se guarda el archivo original** de cada importación. Podés volver a descargarlo o reimportarlo con otro mapeo si te equivocaste.
 - **FSRS** vía [`ts-fsrs`](https://github.com/open-spaced-repetition/ts-fsrs), con cuatro botones (Otra vez / Difícil / Bien / Fácil) y el intervalo previsto en cada uno. La programación se calcula en el servidor.
+- **Fórmulas y formato en la tarjeta.** Se renderiza LaTeX con [KaTeX](https://katex.org) entre `\( \)`, `\[ \]`, `$$ $$` o `[$] [/$]`, y un subconjunto seguro de HTML (`<br>`, `<b>`, `<i>`, `<u>`, `<small>`, `<sup>`, `<sub>`, `<code>`, listas). Todo lo demás se muestra como texto: ninguna etiqueta que venga en un archivo importado llega al DOM.
 - **Límites diarios** por mazo para tarjetas nuevas y repasos, calculados en tu zona horaria.
 - **Detección de duplicados** al reimportar: podés omitir, actualizar o forzar el alta.
 - **Tarjetas inversas** opcionales (se estudia también respuesta → pregunta).
@@ -73,6 +74,15 @@ ribosoma	Sintetiza proteinas	biologia organelos
 Las columnas reconocidas por nombre son `Front`/`Pregunta`, `Back`/`Respuesta`, `Hint`/`Pista`, `Extra`/`Notas` y `Tags`/`Etiquetas`; si el archivo no tiene encabezado, se asume que la primera columna es el frente y la segunda el reverso. Siempre podés cambiar el mapeo a mano antes de importar.
 
 **Por qué TSV y no CSV**: los tabuladores prácticamente nunca aparecen dentro del texto de una tarjeta, mientras que las comas sí. TSV es también lo que Anki genera por defecto al exportar "Notas en texto plano". De todos modos, el importador acepta ambos.
+
+El texto de cada campo admite fórmulas en LaTeX y HTML sencillo:
+
+```tsv
+Front	Back
+¿Qué es el exceso de portadores?	\(\Delta n=n-n_0\) en \(\mathrm{cm^{-3}}\).<br><br><small>Guía §1.</small>
+```
+
+Las fórmulas van entre `\( \)` (en la línea) o `\[ \]` (en su propio renglón); también se aceptan `$$ $$` y los `[$] [/$]` de Anki. El `$` suelto sólo abre una fórmula si cierra en el mismo renglón y no parece una cifra, así que `$5` sigue siendo un precio. De las etiquetas HTML se respeta una lista corta y se descartan sus atributos; el resto se ignora conservando el texto de adentro.
 
 En `ejemplos/` hay dos mazos listos para probar.
 
@@ -141,7 +151,7 @@ Si usaste la versión que guardaba todo en el navegador, al entrar por primera v
 ## Limitaciones actuales
 
 - Hace falta conexión con el servidor: no hay modo sin conexión.
-- El contenido de las tarjetas se muestra como texto plano; no se renderiza HTML ni imágenes.
+- No se muestran imágenes ni audio dentro de las tarjetas: sólo texto, HTML sencillo y fórmulas.
 - No se importan archivos `.apkg` de Anki (son un ZIP con una base SQLite adentro).
 - No hay recuperación de contraseña por email. Para una cuenta común, quien administre puede eliminarla y volver a invitar; si se pierde la de la única cuenta administradora, hay que tocar la base a mano.
 

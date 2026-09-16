@@ -13,8 +13,10 @@ import {
   Tag,
 } from '../components/ui.tsx'
 import { StrengthLegend, StrengthStrip } from '../components/StrengthStrip.tsx'
+import { Contenido } from '../components/Contenido.tsx'
 import { cx, inputClass } from '../lib/classnames.ts'
 import { formatDate } from '../lib/format.ts'
+import { textoPlano } from '../lib/contenido.ts'
 import {
   CardState,
   DEFAULT_DECK_CONFIG,
@@ -68,8 +70,8 @@ export default function DeckDetail() {
     if (!q) return notes
     return notes.filter(
       ({ note }) =>
-        note.front.toLowerCase().includes(q) ||
-        note.back.toLowerCase().includes(q) ||
+        textoPlano(note.front).toLowerCase().includes(q) ||
+        textoPlano(note.back).toLowerCase().includes(q) ||
         note.tags.some((t) => t.toLowerCase().includes(q)),
     )
   }, [consulta.data, query])
@@ -189,8 +191,16 @@ export default function DeckDetail() {
               <li key={note.id} className="group border-b border-rule">
                 <div className="flex items-start justify-between gap-5 py-3.5">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-ink">{note.front}</p>
-                    <p className="mt-0.5 truncate text-sm text-ink-2">{note.back}</p>
+                    <Contenido
+                      enLinea
+                      texto={note.front}
+                      className="truncate font-medium text-ink"
+                    />
+                    <Contenido
+                      enLinea
+                      texto={note.back}
+                      className="mt-0.5 truncate text-sm text-ink-2"
+                    />
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                       {cards.map((card) => {
                         const state = cardState(card.state, card.scheduledDays)
